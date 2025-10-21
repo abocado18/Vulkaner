@@ -9,11 +9,35 @@
 
 namespace render
 {
-    class RenderContext
+
+
+    class IRenderContext
+    {
+        public:
+        IRenderContext() = default;
+        ~IRenderContext() = default;
+
+
+        virtual inline bool windowShouldClose() const = 0;
+
+        virtual void update() = 0;
+
+    };
+
+
+
+
+    class RenderContext : public IRenderContext
     {
     public:
         RenderContext(uint32_t width, uint32_t height);
         ~RenderContext();
+
+
+
+        inline bool windowShouldClose() const override;
+
+        inline void update() override;
 
     private:
 
@@ -28,6 +52,10 @@ namespace render
 
 
     GLFWwindow *window;
+
+
+
+    void recreateSwapchain(uint32_t width, uint32_t height);
 
 
 

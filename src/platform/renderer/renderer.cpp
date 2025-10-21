@@ -126,3 +126,19 @@ render::RenderContext::~RenderContext()
 
     glfwTerminate();
 }
+
+bool render::RenderContext::windowShouldClose() const
+{
+    return glfwWindowShouldClose(window);
+}
+
+void render::RenderContext::update()
+{
+    glfwPollEvents();
+}
+
+
+void render::RenderContext::recreateSwapchain(uint32_t width, uint32_t height)
+{
+    
+}
