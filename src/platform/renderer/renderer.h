@@ -21,7 +21,7 @@ namespace render
     vkb::PhysicalDevice physical_device;
     vkb::Device device;
     VkSurfaceKHR surface;
-
+    vkb::Swapchain swapchain;
 
     VkQueue graphics_queue;
     uint32_t graphics_queue_index;

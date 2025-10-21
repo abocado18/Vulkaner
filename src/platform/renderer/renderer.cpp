@@ -96,10 +96,28 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
 
     graphics_queue = graphics_queue_ret.value();
     graphics_queue_index = device.get_queue_index(vkb::QueueType::graphics).value();
+
+    vkb::SwapchainBuilder swapchain_builder(device);
+
+    auto swapchain_ret = swapchain_builder
+                             .set_desired_min_image_count(3)
+                             .set_desired_format(VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+                             .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
+                             .set_desired_extent(width, height)
+                             .build();
+
+    if(!swapchain_ret)
+    {
+        std::cerr << "Could not create Swapchain\n";
+        abort();
+    }
+
+    swapchain = swapchain_ret.value();
 }
 
 render::RenderContext::~RenderContext()
 {
+    vkb::destroy_swapchain(swapchain);
     vkb::destroy_device(device);
     vkb::destroy_surface(instance, surface);
     vkb::destroy_instance(instance);
