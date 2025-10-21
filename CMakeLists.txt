@@ -15,6 +15,7 @@ file(GLOB_RECURSE MY_CODE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE
 
 
 add_subdirectory(deps/vk-bootstrap)
+add_subdirectory(deps/glfw)
 
 
 
@@ -22,7 +23,7 @@ add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${MY_CODE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} vk-bootstrap::vk-bootstrap)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} vk-bootstrap::vk-bootstrap glfw)
 
 
 if (MSVC)
