@@ -39,6 +39,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
 
 
+add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)
+
+
+
 if (MSVC)
     target_compile_options(${PROJECT_NAME}  PRIVATE /O2 /Ob2 /DNDEBUG) 
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

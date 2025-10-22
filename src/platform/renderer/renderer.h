@@ -6,6 +6,8 @@
 
 #include "GLFW/glfw3.h"
 
+#include "resource_handler.h"
+
 #include<vector>
 
 #define VK_ERROR(result)                              \
@@ -77,6 +79,6 @@ namespace render
 
         void render();
 
-        void createSwapchain(uint32_t width, uint32_t height, bool has_old_swapchain = false, Swapchain old_swapchain = {});
+        void createSwapchain(bool has_old_swapchain = false, Swapchain old_swapchain = {});
     };
 }

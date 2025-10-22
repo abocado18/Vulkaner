@@ -37,7 +37,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
 
             vkDeviceWaitIdle(ctx->device);
 
-            ctx->createSwapchain(width, height, true, ctx->swapchain);
+            ctx->createSwapchain(true, ctx->swapchain);
         };
 
         glfwSetWindowUserPointer(window, this);
@@ -50,7 +50,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
     const char **glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_instance_extension_count);
 
     std::vector<const char *> enabled_layers = {};
-#ifndef VULKAN_USE_VALIDATION_LAYERS
+#ifdef VULKAN_USE_VALIDATION_LAYERS
     {
 
         uint32_t property_count;
@@ -298,7 +298,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
     }
 
     {
-        createSwapchain(width, height);
+        createSwapchain();
     }
 
     {
@@ -414,7 +414,7 @@ void render::RenderContext::render()
             return;
         }
 
-        createSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height), true, swapchain);
+        createSwapchain(true, swapchain);
     }
 
     vkResetFences(device, 1, &fence);
@@ -562,11 +562,11 @@ void render::RenderContext::render()
             return;
         }
 
-        createSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height), true, swapchain);
+        createSwapchain(true, swapchain);
     }
 }
 
-void render::RenderContext::createSwapchain(uint32_t width, uint32_t height, bool has_old_swapchain, Swapchain old_swapchain)
+void render::RenderContext::createSwapchain(bool has_old_swapchain, Swapchain old_swapchain)
 {
     uint32_t surface_format_count;
     vkGetPhysicalDeviceSurfaceFormatsKHR(this->physical_device, this->surface, &surface_format_count, nullptr);
@@ -588,6 +588,9 @@ void render::RenderContext::createSwapchain(uint32_t width, uint32_t height, boo
         }
     }
 
+    VkSurfaceCapabilitiesKHR surface_capabilities = {};
+    VK_ERROR(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &surface_capabilities));
+
     VkSwapchainCreateInfoKHR create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     create_info.imageFormat = surface_format.format;
@@ -595,11 +598,11 @@ void render::RenderContext::createSwapchain(uint32_t width, uint32_t height, boo
     create_info.clipped = VK_TRUE;
     create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     create_info.minImageCount = 3;
-    create_info.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    create_info.presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
     create_info.queueFamilyIndexCount = 1;
     create_info.pQueueFamilyIndices = &graphics_queue_index;
     create_info.imageArrayLayers = 1;
-    create_info.imageExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+    create_info.imageExtent = {surface_capabilities.currentExtent.width, surface_capabilities.currentExtent.height};
     create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     create_info.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
@@ -645,5 +648,8 @@ void render::RenderContext::createSwapchain(uint32_t width, uint32_t height, boo
         }
 
         vkDestroySwapchainKHR(device, old_swapchain.swapchain, nullptr);
+
+         
+        
     }
 }
