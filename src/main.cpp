@@ -2,6 +2,7 @@
 
 #include "main.h"
 
+#define VULKAN_USE_VALIDATION_LAYERS
 #include "platform/renderer/renderer.h"
 
 int main()

@@ -1,31 +1,45 @@
 #pragma once
 
-#include "vulkan/vulkan.h"
-#include "VkBootstrap.h"
+#include "volk.h"
 
 #include "allocator/vk_mem_alloc.h"
 
 #include "GLFW/glfw3.h"
 
+#include<vector>
+
+#define VK_ERROR(result)                              \
+    {                                                 \
+        if (result != VK_SUCCESS)                     \
+        {                                             \
+            std::cerr << "Error: " << result << "\n"; \
+            abort();                                  \
+        }                                             \
+    }
+
 namespace render
 {
 
 
+    struct Swapchain
+    {
+        VkSwapchainKHR swapchain;
+        std::vector<VkImage> images;
+        std::vector<VkImageView> views;
+        VkExtent2D extent;
+    };
+
+    /// Virtual class that contains all functions used for rendering
     class IRenderContext
     {
-        public:
+    public:
         IRenderContext() = default;
         ~IRenderContext() = default;
-
 
         virtual inline bool windowShouldClose() const = 0;
 
         virtual void update() = 0;
-
     };
-
-
-
 
     class RenderContext : public IRenderContext
     {
@@ -33,31 +47,36 @@ namespace render
         RenderContext(uint32_t width, uint32_t height);
         ~RenderContext();
 
-
-
         inline bool windowShouldClose() const override;
 
         inline void update() override;
 
     private:
+        VkInstance instance;
+        VkPhysicalDevice physical_device;
+        VkDevice device;
+        VkSurfaceKHR surface;
+        Swapchain swapchain;
+        
+        VmaAllocator vma_allocator;
 
-    vkb::Instance instance;
-    vkb::PhysicalDevice physical_device;
-    vkb::Device device;
-    VkSurfaceKHR surface;
-    vkb::Swapchain swapchain;
+        VkQueue graphics_queue;
+        uint32_t graphics_queue_index;
 
-    VkQueue graphics_queue;
-    uint32_t graphics_queue_index;
+        VkCommandBuffer primary_command_buffer;
+        VkCommandPool command_pool;
 
+        VkSemaphore aquire_image_semaphore;
+        std::vector<VkSemaphore> rendering_finished_semaphores;
 
-    GLFWwindow *window;
+        VkFence fence;
 
+        GLFWwindow *window;
 
+        void recreateSwapchain(uint32_t width, uint32_t height);
 
-    void recreateSwapchain(uint32_t width, uint32_t height);
+        void render();
 
-
-
+        void createSwapchain(uint32_t width, uint32_t height, bool has_old_swapchain = false, Swapchain old_swapchain = {});
     };
 }

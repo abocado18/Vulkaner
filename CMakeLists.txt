@@ -14,16 +14,29 @@ file(GLOB_RECURSE MY_CODE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE
 
 
 
-add_subdirectory(deps/vk-bootstrap)
+
 add_subdirectory(deps/glfw)
 
+
+#Volk for loading vulkan pointers
+
+if (WIN32)
+   set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
+elseif(UNIX)
+    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_XCB_KHR)
+
+
+endif()
+
+
+add_subdirectory(deps/volk)
 
 
 add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${MY_CODE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} vk-bootstrap::vk-bootstrap glfw)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
 
 
 if (MSVC)
