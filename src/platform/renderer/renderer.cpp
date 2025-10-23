@@ -164,7 +164,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
           VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-          VK_EXT_SHADER_OBJECT_EXTENSION_NAME};
+      };
 
       if (areExtensionsSupported(required_extensions)) {
         candidates.insert(std::make_pair(score, d));
@@ -232,7 +232,6 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
         VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
         VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-        VK_EXT_SHADER_OBJECT_EXTENSION_NAME
 
     };
 
@@ -422,9 +421,8 @@ void render::RenderContext::render() {
       resource_handler::TransistionData transistion_data = {};
       transistion_data.data.image_data.image_layout =
           resource_handler::COLOR_ATTACHMENT_OPTIMAL;
-     
 
-      resource_handler.updateTransistionForLayouts(
+      resource_handler.updateTransistion(
           primary_command_buffer, transistion_data,
           swapchain.resource_image_indices[swapchain_image_index]);
     }
@@ -455,9 +453,8 @@ void render::RenderContext::render() {
     resource_handler::TransistionData transistion_data = {};
     transistion_data.data.image_data.image_layout =
         resource_handler::PRESENT_SRC_KHR;
-  
 
-    resource_handler.updateTransistionForLayouts(
+    resource_handler.updateTransistion(
         primary_command_buffer, transistion_data,
         swapchain.resource_image_indices[swapchain_image_index]);
   }

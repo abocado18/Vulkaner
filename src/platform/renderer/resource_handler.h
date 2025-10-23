@@ -154,7 +154,7 @@ enum BufferAccessMasks {
 enum class ResourceType { BUFFER, IMAGE };
 
 struct TransistionImageData {
-  
+
   ImageLayouts image_layout;
 };
 
@@ -197,9 +197,9 @@ public:
   ResourceHandler();
   ~ResourceHandler();
 
-  void updateTransistionForLayouts(VkCommandBuffer command_buffer,
-                                   TransistionData transistion_data,
-                                   uint64_t resource_idx);
+  void updateTransistion(VkCommandBuffer command_buffer,
+                         TransistionData transistion_data,
+                         uint64_t resource_idx);
 
   uint64_t insertResource(Resource &resource);
 

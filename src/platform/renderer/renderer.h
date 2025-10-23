@@ -8,6 +8,9 @@
 
 #include "resource_handler.h"
 
+#include "pipeline.h"
+#include "vertex.h"
+
 #include <cstdint>
 #include <vector>
 

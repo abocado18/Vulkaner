@@ -15,7 +15,7 @@ uint64_t resource_handler::ResourceHandler::insertResource(
   return id;
 }
 
-void resource_handler::ResourceHandler::updateTransistionForLayouts(
+void resource_handler::ResourceHandler::updateTransistion(
     VkCommandBuffer command_buffer, TransistionData transistion_data,
     uint64_t resource_idx) {
 
