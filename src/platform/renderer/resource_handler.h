@@ -3,7 +3,6 @@
 #include "volk.h"
 
 #include <unordered_map>
-#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace resource_handler {
