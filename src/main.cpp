@@ -13,6 +13,8 @@ int main()
     while (render_ctx.windowShouldClose() == false)
     {
         render_ctx.update();
+
+        
     }
     
 
