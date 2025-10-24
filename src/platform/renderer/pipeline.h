@@ -4,7 +4,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <vulkan/vulkan_core.h>
+
+#include "slang-com-helper.h"
+#include "slang-com-ptr.h"
+#include "slang.h"
 
 namespace pipeline {
 
@@ -39,7 +42,7 @@ struct RenderPipeline {
 
 class PipelineManager {
 public:
-  PipelineManager(VkDevice &device) : device(device) {};
+  PipelineManager(VkDevice &device, const std::string &shader_path);
   ~PipelineManager() = default;
 
   uint64_t createRenderPipeline(PipelineData &pipeline_data,
@@ -51,9 +54,13 @@ public:
 private:
   VkDevice &device;
 
-  VkShaderModule createShaderModule(const std::string &path);
+  Slang::ComPtr<slang::IGlobalSession> global_session;
+  slang::SessionDesc session_desc;
+  Slang::ComPtr<slang::ISession> session;
 
   std::unordered_map<uint64_t, RenderPipeline> pipelines = {};
+
+  VkShaderModule createShaderModule(const std::string &path);
 };
 
 } // namespace pipeline

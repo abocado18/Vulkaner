@@ -1,10 +1,45 @@
 #include "pipeline.h"
 #include "vertex.h"
 #include <array>
+#include <cassert>
+#include <cstdlib>
 #include <fstream>
-#include <vulkan/vulkan_core.h>
+#include <slang-com-ptr.h>
+#include <slang-deprecated.h>
+#include <slang.h>
+#include <string>
 
 #include "vulkan_macros.h"
+
+pipeline::PipelineManager::PipelineManager(VkDevice &device,
+                                           const std::string &shader_path)
+    : device(device) {
+
+  slang::createGlobalSession(global_session.writeRef());
+
+  session_desc = {};
+
+  slang::TargetDesc target_desc = {};
+
+  target_desc.format = SLANG_SPIRV;
+  target_desc.profile = global_session->findProfile("spirv_1_5");
+
+  session_desc.targetCount = 1;
+  session_desc.targets = &target_desc;
+
+  std::array<slang::CompilerOptionEntry, 1> options = {
+      {slang::CompilerOptionName::EmitSpirvDirectly,
+       {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
+  session_desc.compilerOptionEntries = options.data();
+  session_desc.compilerOptionEntryCount = options.size();
+
+  std::array<const char *, 1> search_paths = {shader_path.c_str()};
+
+  session_desc.searchPathCount = search_paths.size();
+  session_desc.searchPaths = search_paths.data();
+
+  global_session->createSession(session_desc, session.writeRef());
+}
 
 pipeline::PipelineData pipeline::PipelineData::getDefault() {
 
@@ -203,6 +238,23 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
 
 VkShaderModule
 pipeline::PipelineManager::createShaderModule(const std::string &path) {
+
+#ifndef PRODUCTION_BUILD
+  if (path.find(".spv") == std::string::npos &&
+      path.find(".slang") == std::string::npos) {
+    std::cerr << "Must be Spir-V binary file or a slang source file\n";
+    std::abort();
+  }
+
+#endif
+
+  if (path.find(".slang") != std::string::npos) {
+    Slang::ComPtr<slang::ICompileRequest> compileRequest;
+    session->createCompileRequest(compileRequest.writeRef());
+
+    compileRequest->addTranslationUnitSourceFile(int translationUnitIndex, const char *path)
+  }
+
   std::ifstream file(path, std::ios::ate | std::ios::binary);
 
   if (!file.is_open()) {
