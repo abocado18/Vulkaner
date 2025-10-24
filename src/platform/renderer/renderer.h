@@ -14,13 +14,7 @@
 #include <cstdint>
 #include <vector>
 
-#define VK_ERROR(result)                                                       \
-  {                                                                            \
-    if (result != VK_SUCCESS) {                                                \
-      std::cerr << "Error: " << result << "\n";                                \
-      abort();                                                                 \
-    }                                                                          \
-  }
+
 
 namespace render {
 

@@ -7,7 +7,7 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <vulkan/vulkan_core.h>
+#include "vulkan_macros.h"
 
 render::RenderContext::RenderContext(uint32_t width, uint32_t height)
     : resource_handler({}) {

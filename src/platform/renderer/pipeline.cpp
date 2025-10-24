@@ -1,6 +1,10 @@
 #include "pipeline.h"
 #include "vertex.h"
+#include <array>
+#include <fstream>
 #include <vulkan/vulkan_core.h>
+
+#include "vulkan_macros.h"
 
 pipeline::PipelineData pipeline::PipelineData::getDefault() {
 
@@ -122,4 +126,105 @@ pipeline::PipelineData pipeline::PipelineData::getDefault() {
   data.rendering_create_info = rendering_create_info;
 
   return data;
+}
+
+uint64_t pipeline::PipelineManager::createRenderPipeline(
+    pipeline::PipelineData &pipeline_data,
+    const std::string &vertex_shader_path,
+    const std::string &pixel_shader_path) {
+
+  static uint64_t next_id = 0;
+  const uint64_t id = next_id++;
+
+  pipeline::RenderPipeline pipeline = {};
+
+  std::array<VkShaderModule, 2> modules = {};
+
+  modules[0] = createShaderModule(vertex_shader_path);
+
+  if (pixel_shader_path != "") {
+    modules[1] = createShaderModule(pixel_shader_path);
+  }
+
+  std::array<VkPipelineShaderStageCreateInfo, 2> shader_stage_create_infos = {};
+  shader_stage_create_infos[0].sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  shader_stage_create_infos[0].pName = "main";
+  shader_stage_create_infos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  shader_stage_create_infos[0].module = modules[0];
+
+  if (pixel_shader_path != "") {
+    shader_stage_create_infos[1].sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_create_infos[1].pName = "main";
+    shader_stage_create_infos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shader_stage_create_infos[1].module = modules[1];
+  }
+
+  VkPipelineLayoutCreateInfo layout_create_info = {};
+  layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layout_create_info.pushConstantRangeCount = 1;
+  layout_create_info.pPushConstantRanges = &pipeline_data.push_constant_range;
+  layout_create_info.setLayoutCount = 0; // Add bindless descriptor sets later
+
+  VK_ERROR(vkCreatePipelineLayout(device, &layout_create_info, nullptr,
+                                  &pipeline.layout));
+
+  VkGraphicsPipelineCreateInfo pipeline_create_info = {};
+  pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipeline_create_info.layout = pipeline.layout;
+  pipeline_create_info.pColorBlendState =
+      &pipeline_data.blend_state_create_info;
+  pipeline_create_info.pDepthStencilState =
+      &pipeline_data.depth_stencil_create_info;
+  pipeline_create_info.pDynamicState = &pipeline_data.dynamic_create_info;
+  pipeline_create_info.pInputAssemblyState =
+      &pipeline_data.assembly_create_info;
+  pipeline_create_info.pMultisampleState =
+      &pipeline_data.multisample_create_info;
+  pipeline_create_info.pRasterizationState =
+      &pipeline_data.rasterization_create_info;
+  pipeline_create_info.pVertexInputState = &pipeline_data.vertex_create_info;
+  pipeline_create_info.pViewportState = &pipeline_data.viewport_create_info;
+  pipeline_create_info.subpass = 0;
+  pipeline_create_info.stageCount = pixel_shader_path == "" ? 1 : 2;
+  pipeline_create_info.pStages = shader_stage_create_infos.data();
+  pipeline_create_info.renderPass = 0; // Dynamic Rendering
+  pipeline_create_info.pNext = &pipeline_data.rendering_create_info;
+
+  // To do: Add Pipeline Caching
+  VK_ERROR(vkCreateGraphicsPipelines(device, 0, 1, &pipeline_create_info,
+                                     nullptr, &pipeline.pipeline));
+
+  pipelines[id] = pipeline;
+
+  return id;
+}
+
+VkShaderModule
+pipeline::PipelineManager::createShaderModule(const std::string &path) {
+  std::ifstream file(path, std::ios::ate | std::ios::binary);
+
+  if (!file.is_open()) {
+    throw std::runtime_error("failed to open file!");
+  }
+
+  size_t file_size = (size_t)file.tellg();
+  std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
+
+  file.seekg(0);
+  file.read((char *)buffer.data(), file_size);
+
+  file.close();
+
+  VkShaderModuleCreateInfo create_info = {
+      VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+  create_info.codeSize = file_size;
+  create_info.pCode = reinterpret_cast<const uint32_t *>(buffer.data());
+
+  VkShaderModule shader_module;
+  VK_ERROR(vkCreateShaderModule(device, &create_info, VK_NULL_HANDLE,
+                                &shader_module));
+
+  return shader_module;
 }
