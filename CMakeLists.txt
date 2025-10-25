@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 
+
+
+
+
 find_package(Vulkan REQUIRED)
 
 file(GLOB_RECURSE MY_HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
@@ -36,10 +40,14 @@ add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${MY_CODE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk slang)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)
+
+set(SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE SHADER_PATH="${SHADER_PATH}")
 
 
 

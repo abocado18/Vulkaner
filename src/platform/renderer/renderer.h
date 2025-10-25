@@ -14,8 +14,6 @@
 #include <cstdint>
 #include <vector>
 
-
-
 namespace render {
 
 struct Swapchain {
@@ -39,7 +37,8 @@ public:
 
 class RenderContext : public IRenderContext {
 public:
-  RenderContext(uint32_t width, uint32_t height);
+  RenderContext(uint32_t width, uint32_t height,
+                const std::string &shader_path);
   ~RenderContext();
 
   bool windowShouldClose() const override;
@@ -54,6 +53,8 @@ private:
   Swapchain swapchain;
 
   resource_handler::ResourceHandler resource_handler;
+
+  pipeline::PipelineManager *pipeline_manager;
 
   VmaAllocator vma_allocator;
 

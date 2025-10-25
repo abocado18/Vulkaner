@@ -2,12 +2,15 @@
 #include "vertex.h"
 #include <array>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
-#include <fstream>
+#include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang-deprecated.h>
 #include <slang.h>
 #include <string>
+#include <vulkan/vulkan_core.h>
 
 #include "vulkan_macros.h"
 
@@ -41,9 +44,14 @@ pipeline::PipelineManager::PipelineManager(VkDevice &device,
   global_session->createSession(session_desc, session.writeRef());
 }
 
-pipeline::PipelineData pipeline::PipelineData::getDefault() {
+pipeline::PipelineManager::~PipelineManager() {
+  for (auto &p : pipelines) {
+    vkDestroyPipeline(device, p.second.pipeline, nullptr);
+    vkDestroyPipelineLayout(device, p.second.layout, nullptr);
+  }
+}
 
-  pipeline::PipelineData data = {};
+void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
 
   VkPushConstantRange push_constant_range = {};
   push_constant_range.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
@@ -52,15 +60,19 @@ pipeline::PipelineData pipeline::PipelineData::getDefault() {
 
   data.push_constant_range = push_constant_range;
 
-  vertex::VertexDesc vertex_desc = vertex::getVertexDesc();
+  data.vertex_desc = vertex::getVertexDesc();
 
-  VkPipelineVertexInputStateCreateInfo vertex_input_state = {
-      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+  VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
+  vertex_input_state.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vertex_input_state.vertexAttributeDescriptionCount =
-      vertex_desc.attribute_desc_count;
-  vertex_input_state.pVertexAttributeDescriptions = vertex_desc.attribute_descs;
-  vertex_input_state.vertexBindingDescriptionCount = 2;
-  vertex_input_state.pVertexBindingDescriptions = vertex_desc.binding_descs;
+      data.vertex_desc.attribute_descs.size();
+  vertex_input_state.pVertexAttributeDescriptions =
+      data.vertex_desc.attribute_descs.data();
+  vertex_input_state.vertexBindingDescriptionCount =
+      data.vertex_desc.binding_descs.size();
+  vertex_input_state.pVertexBindingDescriptions =
+      data.vertex_desc.binding_descs.data();
 
   data.vertex_create_info = vertex_input_state;
 
@@ -102,8 +114,8 @@ pipeline::PipelineData pipeline::PipelineData::getDefault() {
 
   VkPipelineDynamicStateCreateInfo dynamic_state = {
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic_state.dynamicStateCount = dynamic_states.size();
-  dynamic_state.pDynamicStates = dynamic_states.data();
+  dynamic_state.dynamicStateCount = data.dynamic_states.size();
+  dynamic_state.pDynamicStates = data.dynamic_states.data();
 
   data.dynamic_create_info = dynamic_state;
 
@@ -148,25 +160,22 @@ pipeline::PipelineData pipeline::PipelineData::getDefault() {
 
   data.blend_state_create_info = blend_state;
 
-  VkFormat color_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+  data.color_format = VK_FORMAT_R32G32B32A32_SFLOAT;
 
   VkPipelineRenderingCreateInfoKHR rendering_create_info = {};
   rendering_create_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
   rendering_create_info.colorAttachmentCount = 1;
-  rendering_create_info.pColorAttachmentFormats = &color_format;
+  rendering_create_info.pColorAttachmentFormats = &data.color_format;
   rendering_create_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
   rendering_create_info.stencilAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
   data.rendering_create_info = rendering_create_info;
-
-  return data;
 }
 
 uint64_t pipeline::PipelineManager::createRenderPipeline(
-    pipeline::PipelineData &pipeline_data,
-    const std::string &vertex_shader_path,
-    const std::string &pixel_shader_path) {
+    pipeline::PipelineData &pipeline_data, const std::string &shader_name,
+    bool has_pixel_entry) {
 
   static uint64_t next_id = 0;
   const uint64_t id = next_id++;
@@ -175,10 +184,10 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
 
   std::array<VkShaderModule, 2> modules = {};
 
-  modules[0] = createShaderModule(vertex_shader_path);
+  modules[0] = createShaderModule(shader_name, "vertexMain");
 
-  if (pixel_shader_path != "") {
-    modules[1] = createShaderModule(pixel_shader_path);
+  if (has_pixel_entry) {
+    modules[1] = createShaderModule(shader_name, "pixelMain");
   }
 
   std::array<VkPipelineShaderStageCreateInfo, 2> shader_stage_create_infos = {};
@@ -188,7 +197,7 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   shader_stage_create_infos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
   shader_stage_create_infos[0].module = modules[0];
 
-  if (pixel_shader_path != "") {
+  if (has_pixel_entry) {
     shader_stage_create_infos[1].sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shader_stage_create_infos[1].pName = "main";
@@ -222,7 +231,7 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   pipeline_create_info.pVertexInputState = &pipeline_data.vertex_create_info;
   pipeline_create_info.pViewportState = &pipeline_data.viewport_create_info;
   pipeline_create_info.subpass = 0;
-  pipeline_create_info.stageCount = pixel_shader_path == "" ? 1 : 2;
+  pipeline_create_info.stageCount = has_pixel_entry ? 2 : 1;
   pipeline_create_info.pStages = shader_stage_create_infos.data();
   pipeline_create_info.renderPass = 0; // Dynamic Rendering
   pipeline_create_info.pNext = &pipeline_data.rendering_create_info;
@@ -232,51 +241,81 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
                                      nullptr, &pipeline.pipeline));
 
   pipelines[id] = pipeline;
+  name_to_pipeline[shader_name] = id;
+
+  vkDestroyShaderModule(device, modules[0], nullptr);
+
+  if (has_pixel_entry)
+    vkDestroyShaderModule(device, modules[1], nullptr);
 
   return id;
 }
 
-VkShaderModule
-pipeline::PipelineManager::createShaderModule(const std::string &path) {
+VkShaderModule pipeline::PipelineManager::createShaderModule(
+    const std::string &name, const std::string &entry_point_name) {
 
-#ifndef PRODUCTION_BUILD
-  if (path.find(".spv") == std::string::npos &&
-      path.find(".slang") == std::string::npos) {
-    std::cerr << "Must be Spir-V binary file or a slang source file\n";
+  Slang::ComPtr<slang::IModule> module;
+
+  module = session->loadModule(name.c_str());
+
+  if (!module) {
+    std::cerr << "Could not create module\n";
     std::abort();
   }
 
-#endif
+  Slang::ComPtr<slang::IEntryPoint> entry_point;
+  module->findEntryPointByName(entry_point_name.c_str(),
+                               entry_point.writeRef());
 
-  if (path.find(".slang") != std::string::npos) {
-    Slang::ComPtr<slang::ICompileRequest> compileRequest;
-    session->createCompileRequest(compileRequest.writeRef());
-
-    compileRequest->addTranslationUnitSourceFile(int translationUnitIndex, const char *path)
+  if (!entry_point) {
+    std::cerr << "Could not write entry point\n";
+    std::abort();
   }
 
-  std::ifstream file(path, std::ios::ate | std::ios::binary);
+  std::array<slang::IComponentType *, 2> component_types = {module,
+                                                            entry_point};
 
-  if (!file.is_open()) {
-    throw std::runtime_error("failed to open file!");
+  Slang::ComPtr<slang::IComponentType> composed_program;
+
+  SlangResult compose_result = session->createCompositeComponentType(
+      component_types.data(), component_types.size(),
+      composed_program.writeRef());
+
+  if (SLANG_FAILED(compose_result)) {
+    std::cerr << "Could not compose program\n";
+    std::abort();
   }
 
-  size_t file_size = (size_t)file.tellg();
-  std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
+  Slang::ComPtr<slang::IComponentType> linked_program;
 
-  file.seekg(0);
-  file.read((char *)buffer.data(), file_size);
+  SlangResult link_result = composed_program->link(linked_program.writeRef());
 
-  file.close();
+  if (SLANG_FAILED(link_result)) {
+    std::cerr << "Could not link program\n";
+    std::abort();
+  }
+
+  Slang::ComPtr<slang::IBlob> spirv_code;
+
+  SlangResult spirv_result =
+      linked_program->getTargetCode(0, spirv_code.writeRef());
+
+  if (SLANG_FAILED(spirv_result)) {
+    std::cerr << "Could not create Spir-V code\n";
+    std::abort();
+  }
+
+  size_t spirv_size = spirv_code->getBufferSize();
+  const uint32_t *spirv_data =
+      reinterpret_cast<const uint32_t *>(spirv_code->getBufferPointer());
 
   VkShaderModuleCreateInfo create_info = {
       VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-  create_info.codeSize = file_size;
-  create_info.pCode = reinterpret_cast<const uint32_t *>(buffer.data());
+  create_info.codeSize = spirv_size;
+  create_info.pCode = spirv_data;
 
   VkShaderModule shader_module;
-  VK_ERROR(vkCreateShaderModule(device, &create_info, VK_NULL_HANDLE,
-                                &shader_module));
+  VK_ERROR(vkCreateShaderModule(device, &create_info, nullptr, &shader_module));
 
   return shader_module;
 }

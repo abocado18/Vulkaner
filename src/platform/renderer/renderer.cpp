@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "allocator/vk_mem_alloc.h"
+#include "pipeline.h"
 #include "resource_handler.h"
 
 #include <iostream>
@@ -9,7 +10,7 @@
 #include <vector>
 #include "vulkan_macros.h"
 
-render::RenderContext::RenderContext(uint32_t width, uint32_t height)
+render::RenderContext::RenderContext(uint32_t width, uint32_t height, const std::string &shader_path)
     : resource_handler({}) {
 
   if (glfwInit() == GLFW_FALSE) {
@@ -164,6 +165,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
           VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+          
       };
 
       if (areExtensionsSupported(required_extensions)) {
@@ -332,9 +334,22 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height)
 
     VK_ERROR(vkCreateFence(device, &create_info, nullptr, &fence));
   }
+
+  {
+    pipeline_manager = new pipeline::PipelineManager(device, shader_path);
+  }
+
+  {
+    pipeline::PipelineData pipeline_data = {};
+    pipeline::PipelineData::getDefault(pipeline_data);
+    pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
+  }
 }
 
 render::RenderContext::~RenderContext() {
+
+
+  delete pipeline_manager;
 
   vkDeviceWaitIdle(device);
 

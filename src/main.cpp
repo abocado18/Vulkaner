@@ -7,8 +7,9 @@
 
 int main()
 {
+    
 
-    render::RenderContext render_ctx(1280, 720);
+    render::RenderContext render_ctx(1280, 720, SHADER_PATH);
 
     while (render_ctx.windowShouldClose() == false)
     {

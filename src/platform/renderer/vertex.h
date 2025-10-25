@@ -36,16 +36,14 @@ struct alignas(16) Instance {
 static_assert(sizeof(Instance) % 16 == 0);
 
 struct VertexDesc {
-  VkVertexInputAttributeDescription attribute_descs[11];
-  uint32_t attribute_desc_count;
 
-  VkVertexInputBindingDescription binding_descs[2];
+  std::array<VkVertexInputAttributeDescription, 11> attribute_descs;
+
+  std::array<VkVertexInputBindingDescription, 2> binding_descs;
 };
 
 inline VertexDesc getVertexDesc() {
   VertexDesc vertex_desc = {};
-
-  vertex_desc.attribute_desc_count = 11;
 
   vertex_desc.binding_descs[0].binding = 0;
   vertex_desc.binding_descs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;

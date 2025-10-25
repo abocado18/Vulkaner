@@ -1,11 +1,12 @@
 #pragma once
 
+#include "vertex.h"
 #include "volk.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
-#include "slang-com-helper.h"
 #include "slang-com-ptr.h"
 #include "slang.h"
 
@@ -32,7 +33,12 @@ struct PipelineData {
 
   VkPipelineRenderingCreateInfoKHR rendering_create_info;
 
-  PipelineData getDefault();
+  VkFormat color_format;
+
+  vertex::VertexDesc vertex_desc;
+
+
+  static void getDefault(PipelineData &data);
 };
 
 struct RenderPipeline {
@@ -43,13 +49,17 @@ struct RenderPipeline {
 class PipelineManager {
 public:
   PipelineManager(VkDevice &device, const std::string &shader_path);
-  ~PipelineManager() = default;
+  ~PipelineManager();
 
   uint64_t createRenderPipeline(PipelineData &pipeline_data,
-                                const std::string &vertex_shader_path,
-                                const std::string &pixel_shader_path = "");
+                                const std::string &shader_name,
+                                bool has_pixel_entry = true);
 
   inline RenderPipeline getPipeline(uint64_t key) { return pipelines.at(key); }
+
+  inline RenderPipeline getPipelineByName(const std::string &name) {
+    return pipelines.at(name_to_pipeline.at(name));
+  }
 
 private:
   VkDevice &device;
@@ -59,8 +69,10 @@ private:
   Slang::ComPtr<slang::ISession> session;
 
   std::unordered_map<uint64_t, RenderPipeline> pipelines = {};
+  std::unordered_map<std::string, uint64_t> name_to_pipeline = {};
 
-  VkShaderModule createShaderModule(const std::string &path);
+  VkShaderModule createShaderModule(const std::string &name,
+                                    const std::string &entry_point_name);
 };
 
 } // namespace pipeline
