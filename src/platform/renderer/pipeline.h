@@ -16,24 +16,26 @@ struct PipelineData {
 
   VkPushConstantRange push_constant_range;
 
-  VkPipelineVertexInputStateCreateInfo vertex_create_info;
+  
   VkPipelineInputAssemblyStateCreateInfo assembly_create_info;
   VkPipelineMultisampleStateCreateInfo multisample_create_info;
   VkPipelineRasterizationStateCreateInfo rasterization_create_info;
 
   std::vector<VkDynamicState> dynamic_states;
-  VkPipelineDynamicStateCreateInfo dynamic_create_info;
 
   VkPipelineViewportStateCreateInfo viewport_create_info;
 
   VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info;
 
   std::vector<VkPipelineColorBlendAttachmentState> blend_attachment_states;
-  VkPipelineColorBlendStateCreateInfo blend_state_create_info;
+  VkBool32 logic_op_enable = VK_FALSE;
+  VkLogicOp logic_op;
 
-  VkPipelineRenderingCreateInfoKHR rendering_create_info;
 
-  VkFormat color_format;
+
+  std::vector<VkFormat> color_formats;
+  VkFormat depth_format;
+  VkFormat stencil_format;
 
   vertex::VertexDesc vertex_desc;
 

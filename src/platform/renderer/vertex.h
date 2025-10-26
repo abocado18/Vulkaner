@@ -3,6 +3,7 @@
 #include "volk.h"
 
 #include "gpu_structs.h"
+#include <vector>
 
 namespace vertex {
 
@@ -37,13 +38,16 @@ static_assert(sizeof(Instance) % 16 == 0);
 
 struct VertexDesc {
 
-  std::array<VkVertexInputAttributeDescription, 11> attribute_descs;
+  std::vector<VkVertexInputAttributeDescription> attribute_descs;
 
-  std::array<VkVertexInputBindingDescription, 2> binding_descs;
+  std::vector<VkVertexInputBindingDescription> binding_descs;
 };
 
 inline VertexDesc getVertexDesc() {
   VertexDesc vertex_desc = {};
+
+  vertex_desc.attribute_descs.resize(11);
+  vertex_desc.binding_descs.resize(2);
 
   vertex_desc.binding_descs[0].binding = 0;
   vertex_desc.binding_descs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;

@@ -45,6 +45,9 @@ pipeline::PipelineManager::PipelineManager(VkDevice &device,
 }
 
 pipeline::PipelineManager::~PipelineManager() {
+
+  vkDeviceWaitIdle(device);
+
   for (auto &p : pipelines) {
     vkDestroyPipeline(device, p.second.pipeline, nullptr);
     vkDestroyPipelineLayout(device, p.second.layout, nullptr);
@@ -61,20 +64,6 @@ void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
   data.push_constant_range = push_constant_range;
 
   data.vertex_desc = vertex::getVertexDesc();
-
-  VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
-  vertex_input_state.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-  vertex_input_state.vertexAttributeDescriptionCount =
-      data.vertex_desc.attribute_descs.size();
-  vertex_input_state.pVertexAttributeDescriptions =
-      data.vertex_desc.attribute_descs.data();
-  vertex_input_state.vertexBindingDescriptionCount =
-      data.vertex_desc.binding_descs.size();
-  vertex_input_state.pVertexBindingDescriptions =
-      data.vertex_desc.binding_descs.data();
-
-  data.vertex_create_info = vertex_input_state;
 
   VkPipelineInputAssemblyStateCreateInfo assembly_state = {
       VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -112,13 +101,6 @@ void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
       VK_DYNAMIC_STATE_SCISSOR,
   };
 
-  VkPipelineDynamicStateCreateInfo dynamic_state = {
-      VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic_state.dynamicStateCount = data.dynamic_states.size();
-  dynamic_state.pDynamicStates = data.dynamic_states.data();
-
-  data.dynamic_create_info = dynamic_state;
-
   VkPipelineViewportStateCreateInfo viewport_state = {
       VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
   viewport_state.scissorCount = 1;
@@ -152,25 +134,13 @@ void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
 
   data.blend_attachment_states.push_back(blend_attachment);
 
-  VkPipelineColorBlendStateCreateInfo blend_state = {
-      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-  blend_state.attachmentCount = 1;
-  blend_state.pAttachments = &data.blend_attachment_states[0];
-  blend_state.logicOpEnable = VK_FALSE;
+  data.logic_op_enable = VK_FALSE;
+  data.logic_op = VK_LOGIC_OP_CLEAR;
 
-  data.blend_state_create_info = blend_state;
+  data.color_formats = {VK_FORMAT_B8G8R8A8_SRGB};
 
-  data.color_format = VK_FORMAT_B8G8R8A8_SRGB;
-
-  VkPipelineRenderingCreateInfoKHR rendering_create_info = {};
-  rendering_create_info.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
-  rendering_create_info.colorAttachmentCount = 1;
-  rendering_create_info.pColorAttachmentFormats = &data.color_format;
-  rendering_create_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
-  rendering_create_info.stencilAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
-
-  data.rendering_create_info = rendering_create_info;
+  data.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+  data.stencil_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
 uint64_t pipeline::PipelineManager::createRenderPipeline(
@@ -214,27 +184,65 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   VK_ERROR(vkCreatePipelineLayout(device, &layout_create_info, nullptr,
                                   &pipeline.layout));
 
+  VkPipelineVertexInputStateCreateInfo vertex_create_info = {};
+  vertex_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertex_create_info.vertexBindingDescriptionCount =
+      pipeline_data.vertex_desc.binding_descs.size();
+  vertex_create_info.pVertexBindingDescriptions =
+      pipeline_data.vertex_desc.binding_descs.data();
+  vertex_create_info.vertexAttributeDescriptionCount =
+      pipeline_data.vertex_desc.attribute_descs.size();
+  vertex_create_info.pVertexAttributeDescriptions =
+      pipeline_data.vertex_desc.attribute_descs.data();
+
+  VkPipelineDynamicStateCreateInfo dynamic_create_info = {};
+  dynamic_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamic_create_info.dynamicStateCount = pipeline_data.dynamic_states.size();
+  dynamic_create_info.pDynamicStates = pipeline_data.dynamic_states.data();
+
+  VkPipelineRenderingCreateInfoKHR rendering_create_info = {};
+  rendering_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+  rendering_create_info.colorAttachmentCount =
+      pipeline_data.color_formats.size();
+  rendering_create_info.pColorAttachmentFormats =
+      pipeline_data.color_formats.data();
+  rendering_create_info.depthAttachmentFormat = pipeline_data.depth_format;
+  rendering_create_info.stencilAttachmentFormat = pipeline_data.stencil_format;
+  rendering_create_info.viewMask = 0;
+
+  VkPipelineColorBlendStateCreateInfo blend_state_create_info = {};
+  blend_state_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  blend_state_create_info.logicOpEnable = pipeline_data.logic_op_enable;
+  blend_state_create_info.logicOp = pipeline_data.logic_op;
+  blend_state_create_info.attachmentCount =
+      pipeline_data.blend_attachment_states.size();
+  blend_state_create_info.pAttachments =
+      pipeline_data.blend_attachment_states.data();
+
   VkGraphicsPipelineCreateInfo pipeline_create_info = {};
   pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipeline_create_info.layout = pipeline.layout;
-  pipeline_create_info.pColorBlendState =
-      &pipeline_data.blend_state_create_info;
+  pipeline_create_info.pColorBlendState = &blend_state_create_info;
   pipeline_create_info.pDepthStencilState =
       &pipeline_data.depth_stencil_create_info;
-  pipeline_create_info.pDynamicState = &pipeline_data.dynamic_create_info;
+  pipeline_create_info.pDynamicState = &dynamic_create_info;
   pipeline_create_info.pInputAssemblyState =
       &pipeline_data.assembly_create_info;
   pipeline_create_info.pMultisampleState =
       &pipeline_data.multisample_create_info;
   pipeline_create_info.pRasterizationState =
       &pipeline_data.rasterization_create_info;
-  pipeline_create_info.pVertexInputState = &pipeline_data.vertex_create_info;
+  pipeline_create_info.pVertexInputState = &vertex_create_info;
   pipeline_create_info.pViewportState = &pipeline_data.viewport_create_info;
   pipeline_create_info.subpass = 0;
   pipeline_create_info.stageCount = has_pixel_entry ? 2 : 1;
   pipeline_create_info.pStages = shader_stage_create_infos.data();
   pipeline_create_info.renderPass = 0; // Dynamic Rendering
-  pipeline_create_info.pNext = &pipeline_data.rendering_create_info;
+  pipeline_create_info.pNext = &rendering_create_info;
 
   // To do: Add Pipeline Caching
   VK_ERROR(vkCreateGraphicsPipelines(device, 0, 1, &pipeline_create_info,

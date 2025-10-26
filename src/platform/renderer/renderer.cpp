@@ -345,6 +345,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     pipeline::PipelineData pipeline_data = {};
     pipeline::PipelineData::getDefault(pipeline_data);
     pipeline_data.rasterization_create_info.cullMode = VK_CULL_MODE_NONE;
+    pipeline_data.vertex_desc.attribute_descs.clear();
+    pipeline_data.vertex_desc.binding_descs.clear();
 
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
   }
