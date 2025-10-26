@@ -23,7 +23,7 @@ pipeline::PipelineManager::PipelineManager(VkDevice &device,
 
   session_desc = {};
 
-  slang::TargetDesc target_desc = {};
+  target_desc = {};
 
   target_desc.format = SLANG_SPIRV;
   target_desc.profile = global_session->findProfile("spirv_1_5");
@@ -333,6 +333,9 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
     std::abort();
   }
 
+  
+
+
   Slang::ComPtr<slang::IBlob> spirv_code;
 
   SlangResult spirv_result =
@@ -387,7 +390,10 @@ void pipeline::PipelineManager::reload()
 
     this->session = nullptr;
 
-    slang::TargetDesc target_desc = {};
+
+
+    session_desc = {};
+    target_desc = {};
 
     target_desc.format = SLANG_SPIRV;
     target_desc.profile = global_session->findProfile("spirv_1_5");

@@ -21,5 +21,5 @@ VSOut vertexMain(uint id : SV_VertexID)
 [shader("fragment")]
 float4 pixelMain(VSOut input) : SV_Target
 {
-    return float4(0, 1, 1, 1); // red triangle
+    return float4(0a, 1, 0, 1); // red triangle
 }

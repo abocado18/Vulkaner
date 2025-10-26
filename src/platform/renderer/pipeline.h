@@ -88,6 +88,7 @@ private:
 
   Slang::ComPtr<slang::IGlobalSession> global_session;
   slang::SessionDesc session_desc;
+  slang::TargetDesc target_desc;
   Slang::ComPtr<slang::ISession> session;
 
   std::unordered_map<uint64_t, RenderPipeline> pipelines = {};
