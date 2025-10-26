@@ -4,13 +4,15 @@
 #include "pipeline.h"
 #include "resource_handler.h"
 
+#include "vulkan_macros.h"
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
-#include "vulkan_macros.h"
+#include <vulkan/vulkan_core.h>
 
-render::RenderContext::RenderContext(uint32_t width, uint32_t height, const std::string &shader_path)
+render::RenderContext::RenderContext(uint32_t width, uint32_t height,
+                                     const std::string &shader_path)
     : resource_handler({}) {
 
   if (glfwInit() == GLFW_FALSE) {
@@ -165,7 +167,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height, const std:
           VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-          
+
       };
 
       if (areExtensionsSupported(required_extensions)) {
@@ -342,12 +344,13 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height, const std:
   {
     pipeline::PipelineData pipeline_data = {};
     pipeline::PipelineData::getDefault(pipeline_data);
+    pipeline_data.rasterization_create_info.cullMode = VK_CULL_MODE_NONE;
+
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
   }
 }
 
 render::RenderContext::~RenderContext() {
-
 
   delete pipeline_manager;
 
@@ -459,6 +462,26 @@ void render::RenderContext::render() {
     rendering_info.pColorAttachments = &attachment_info;
 
     vkCmdBeginRenderingKHR(primary_command_buffer, &rendering_info);
+
+    vkCmdBindPipeline(primary_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline_manager->getPipelineByName("triangle").pipeline);
+
+    VkViewport viewport = {};
+    viewport.height = swapchain.extent.height;
+    viewport.width = swapchain.extent.width;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    viewport.x = 0.f;
+    viewport.y = 0.f;
+
+    VkRect2D scissor = {};
+    scissor.extent = swapchain.extent;
+    scissor.offset = {0, 0};
+
+    vkCmdSetViewport(primary_command_buffer, 0, 1, &viewport);
+    vkCmdSetScissor(primary_command_buffer, 0, 1, &scissor);
+
+    vkCmdDraw(primary_command_buffer, 3, 1, 0, 0);
 
     vkCmdEndRenderingKHR(primary_command_buffer);
   }

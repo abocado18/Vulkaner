@@ -160,7 +160,7 @@ void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
 
   data.blend_state_create_info = blend_state;
 
-  data.color_format = VK_FORMAT_R32G32B32A32_SFLOAT;
+  data.color_format = VK_FORMAT_B8G8R8A8_SRGB;
 
   VkPipelineRenderingCreateInfoKHR rendering_create_info = {};
   rendering_create_info.sType =
