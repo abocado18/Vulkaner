@@ -390,6 +390,11 @@ bool render::RenderContext::windowShouldClose() const {
 
 void render::RenderContext::update() {
   glfwPollEvents();
+  #ifndef PRODUCTION_BUILD
+
+  pipeline_manager->reload();
+
+  #endif
 
   render();
 }

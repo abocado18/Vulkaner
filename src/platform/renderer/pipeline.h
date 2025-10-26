@@ -2,6 +2,7 @@
 
 #include "vertex.h"
 #include "volk.h"
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,7 +17,6 @@ struct PipelineData {
 
   VkPushConstantRange push_constant_range;
 
-  
   VkPipelineInputAssemblyStateCreateInfo assembly_create_info;
   VkPipelineMultisampleStateCreateInfo multisample_create_info;
   VkPipelineRasterizationStateCreateInfo rasterization_create_info;
@@ -31,14 +31,11 @@ struct PipelineData {
   VkBool32 logic_op_enable = VK_FALSE;
   VkLogicOp logic_op;
 
-
-
   std::vector<VkFormat> color_formats;
   VkFormat depth_format;
   VkFormat stencil_format;
 
   vertex::VertexDesc vertex_desc;
-
 
   static void getDefault(PipelineData &data);
 };
@@ -48,6 +45,19 @@ struct RenderPipeline {
   VkPipeline pipeline;
 };
 
+#ifndef PRODUCTION_BUILD
+
+struct CachedPipelineForHotReload {
+
+  RenderPipeline pipeline;
+  std::string last_changed_time;
+  PipelineData pipeline_data;
+  bool has_pixel_entry;
+  uint64_t index;
+};
+
+#endif
+
 class PipelineManager {
 public:
   PipelineManager(VkDevice &device, const std::string &shader_path);
@@ -55,7 +65,7 @@ public:
 
   uint64_t createRenderPipeline(PipelineData &pipeline_data,
                                 const std::string &shader_name,
-                                bool has_pixel_entry = true);
+                                bool has_pixel_entry = true, uint64_t pipeline_index = UINT64_MAX);
 
   inline RenderPipeline getPipeline(uint64_t key) { return pipelines.at(key); }
 
@@ -63,8 +73,18 @@ public:
     return pipelines.at(name_to_pipeline.at(name));
   }
 
+  #ifndef PRODUCTION_BUILD
+
+  void reload();
+
+  std::unordered_map<std::string, CachedPipelineForHotReload> pipelines_for_reload = {};
+
+  #endif
+
 private:
   VkDevice &device;
+
+  std::string shader_path;
 
   Slang::ComPtr<slang::IGlobalSession> global_session;
   slang::SessionDesc session_desc;

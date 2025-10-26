@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang-deprecated.h>
@@ -16,7 +17,7 @@
 
 pipeline::PipelineManager::PipelineManager(VkDevice &device,
                                            const std::string &shader_path)
-    : device(device) {
+    : shader_path(shader_path), device(device) {
 
   slang::createGlobalSession(global_session.writeRef());
 
@@ -145,10 +146,10 @@ void pipeline::PipelineData::getDefault(pipeline::PipelineData &data) {
 
 uint64_t pipeline::PipelineManager::createRenderPipeline(
     pipeline::PipelineData &pipeline_data, const std::string &shader_name,
-    bool has_pixel_entry) {
+    bool has_pixel_entry, uint64_t pipeline_index) {
 
   static uint64_t next_id = 0;
-  const uint64_t id = next_id++;
+  const uint64_t id = pipeline_index == UINT64_MAX ? next_id++ : pipeline_index;
 
   pipeline::RenderPipeline pipeline = {};
 
@@ -256,6 +257,35 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   if (has_pixel_entry)
     vkDestroyShaderModule(device, modules[1], nullptr);
 
+#ifndef PRODUCTION_BUILD
+
+  std::time_t last_changed_time;
+
+  for (size_t i = 0; i < session->getLoadedModuleCount(); i++) {
+
+    if (session->getLoadedModule(i)->getName() == shader_name) {
+
+      std::filesystem::file_time_type last_changed =
+          std::filesystem::last_write_time(
+              session->getLoadedModule(i)->getFilePath());
+
+      auto changed = decltype(last_changed)::clock::to_sys(last_changed);
+
+      last_changed_time = std::chrono::system_clock::to_time_t(changed);
+    }
+  }
+
+  CachedPipelineForHotReload cached_pipeline = {};
+  cached_pipeline.pipeline = pipeline;
+  cached_pipeline.pipeline_data = pipeline_data;
+  cached_pipeline.has_pixel_entry = has_pixel_entry;
+  cached_pipeline.index = id;
+  cached_pipeline.last_changed_time = std::to_string(last_changed_time);
+
+  pipelines_for_reload[shader_name] = cached_pipeline;
+
+#endif
+
   return id;
 }
 
@@ -327,3 +357,69 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   return shader_module;
 }
+
+#ifndef PRODUCTION_BUILD
+
+void pipeline::PipelineManager::reload()
+
+{
+
+  vkDeviceWaitIdle(device);
+
+  for (size_t i = 0; i < session->getLoadedModuleCount(); i++) {
+
+    slang::IModule *module = session->getLoadedModule(i);
+
+    CachedPipelineForHotReload p = pipelines_for_reload.at(module->getName());
+
+    std::filesystem::file_time_type last_changed =
+        std::filesystem::last_write_time(module->getFilePath());
+
+    auto changed = decltype(last_changed)::clock::to_sys(last_changed);
+
+    std::time_t last_changed_time =
+        std::chrono::system_clock::to_time_t(changed);
+
+    if (std::to_string(last_changed_time) == p.last_changed_time)
+      continue;
+
+    std::cout << "Pipeline: " << module->getName() << " changed\n";
+
+    this->session = nullptr;
+
+    slang::TargetDesc target_desc = {};
+
+    target_desc.format = SLANG_SPIRV;
+    target_desc.profile = global_session->findProfile("spirv_1_5");
+
+    session_desc.targetCount = 1;
+    session_desc.targets = &target_desc;
+
+    std::array<slang::CompilerOptionEntry, 1> options = {
+        {slang::CompilerOptionName::EmitSpirvDirectly,
+         {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
+    session_desc.compilerOptionEntries = options.data();
+    session_desc.compilerOptionEntryCount = options.size();
+
+    std::array<const char *, 1> search_paths = {shader_path.c_str()};
+
+    session_desc.searchPathCount = search_paths.size();
+    session_desc.searchPaths = search_paths.data();
+
+    global_session->createSession(session_desc, session.writeRef());
+
+    // Force recompilation
+    Slang::ComPtr<slang::IModule> new_module;
+    new_module = session->loadModule(module->getName());
+
+    uint64_t res = createRenderPipeline(p.pipeline_data, module->getName(),
+                                        p.has_pixel_entry, p.index);
+
+    if (res != UINT64_MAX) {
+      vkDestroyPipelineLayout(device, p.pipeline.layout, nullptr);
+      vkDestroyPipeline(device, p.pipeline.pipeline, nullptr);
+    }
+  }
+}
+
+#endif
