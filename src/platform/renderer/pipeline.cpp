@@ -153,12 +153,20 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
 
   pipeline::RenderPipeline pipeline = {};
 
-  std::array<VkShaderModule, 2> modules = {};
+  std::array<std::optional<VkShaderModule>, 2> modules = {};
 
   modules[0] = createShaderModule(shader_name, "vertexMain");
 
+  if (modules[0].has_value() == false) {
+    return UINT64_MAX;
+  }
+
   if (has_pixel_entry) {
     modules[1] = createShaderModule(shader_name, "pixelMain");
+
+    if (modules[1].has_value() == false) {
+      return UINT64_MAX;
+    }
   }
 
   std::array<VkPipelineShaderStageCreateInfo, 2> shader_stage_create_infos = {};
@@ -166,14 +174,14 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
       VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   shader_stage_create_infos[0].pName = "main";
   shader_stage_create_infos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-  shader_stage_create_infos[0].module = modules[0];
+  shader_stage_create_infos[0].module = modules[0].value();
 
   if (has_pixel_entry) {
     shader_stage_create_infos[1].sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shader_stage_create_infos[1].pName = "main";
     shader_stage_create_infos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shader_stage_create_infos[1].module = modules[1];
+    shader_stage_create_infos[1].module = modules[1].value();
   }
 
   VkPipelineLayoutCreateInfo layout_create_info = {};
@@ -252,14 +260,16 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   pipelines[id] = pipeline;
   name_to_pipeline[shader_name] = id;
 
-  vkDestroyShaderModule(device, modules[0], nullptr);
+  vkDestroyShaderModule(device, modules[0].value(), nullptr);
 
   if (has_pixel_entry)
-    vkDestroyShaderModule(device, modules[1], nullptr);
+    vkDestroyShaderModule(device, modules[1].value(), nullptr);
 
 #ifndef PRODUCTION_BUILD
 
   std::time_t last_changed_time;
+  std::string name;
+  std::string path;
 
   for (size_t i = 0; i < session->getLoadedModuleCount(); i++) {
 
@@ -272,6 +282,9 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
       auto changed = decltype(last_changed)::clock::to_sys(last_changed);
 
       last_changed_time = std::chrono::system_clock::to_time_t(changed);
+
+      name = session->getLoadedModule(i)->getName();
+      path = session->getLoadedModule(i)->getFilePath();
     }
   }
 
@@ -281,6 +294,8 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   cached_pipeline.has_pixel_entry = has_pixel_entry;
   cached_pipeline.index = id;
   cached_pipeline.last_changed_time = std::to_string(last_changed_time);
+  cached_pipeline.name = name;
+  cached_pipeline.path = path;
 
   pipelines_for_reload[shader_name] = cached_pipeline;
 
@@ -289,7 +304,7 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
   return id;
 }
 
-VkShaderModule pipeline::PipelineManager::createShaderModule(
+std::optional<VkShaderModule> pipeline::PipelineManager::createShaderModule(
     const std::string &name, const std::string &entry_point_name) {
 
   Slang::ComPtr<slang::IModule> module;
@@ -298,7 +313,7 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   if (!module) {
     std::cerr << "Could not create module\n";
-    std::abort();
+    return {};
   }
 
   Slang::ComPtr<slang::IEntryPoint> entry_point;
@@ -307,7 +322,7 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   if (!entry_point) {
     std::cerr << "Could not write entry point\n";
-    std::abort();
+    return {};
   }
 
   std::array<slang::IComponentType *, 2> component_types = {module,
@@ -321,7 +336,7 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   if (SLANG_FAILED(compose_result)) {
     std::cerr << "Could not compose program\n";
-    std::abort();
+    return {};
   }
 
   Slang::ComPtr<slang::IComponentType> linked_program;
@@ -330,11 +345,8 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   if (SLANG_FAILED(link_result)) {
     std::cerr << "Could not link program\n";
-    std::abort();
+    return {};
   }
-
-  
-
 
   Slang::ComPtr<slang::IBlob> spirv_code;
 
@@ -343,7 +355,7 @@ VkShaderModule pipeline::PipelineManager::createShaderModule(
 
   if (SLANG_FAILED(spirv_result)) {
     std::cerr << "Could not create Spir-V code\n";
-    std::abort();
+    return {};
   }
 
   size_t spirv_size = spirv_code->getBufferSize();
@@ -369,14 +381,15 @@ void pipeline::PipelineManager::reload()
 
   vkDeviceWaitIdle(device);
 
-  for (size_t i = 0; i < session->getLoadedModuleCount(); i++) {
+  std::vector<CachedPipelineForHotReload> changed_pipelines_to_reload = {};
+  volatile size_t module_count = session->getLoadedModuleCount();
+  changed_pipelines_to_reload.reserve(module_count);
 
-    slang::IModule *module = session->getLoadedModule(i);
-
-    CachedPipelineForHotReload p = pipelines_for_reload.at(module->getName());
+  for (auto &v : pipelines_for_reload) {
+    auto &p = v.second;
 
     std::filesystem::file_time_type last_changed =
-        std::filesystem::last_write_time(module->getFilePath());
+        std::filesystem::last_write_time(p.path);
 
     auto changed = decltype(last_changed)::clock::to_sys(last_changed);
 
@@ -386,39 +399,37 @@ void pipeline::PipelineManager::reload()
     if (std::to_string(last_changed_time) == p.last_changed_time)
       continue;
 
-    std::cout << "Pipeline: " << module->getName() << " changed\n";
+    std::cout << "Pipeline: " << p.name << " changed\n";
 
-    this->session = nullptr;
+    changed_pipelines_to_reload.push_back(p);
+  }
 
+  // Recreate Session for forces recompilation
+  this->session = nullptr;
+  session_desc = {};
+  target_desc = {};
 
+  target_desc.format = SLANG_SPIRV;
+  target_desc.profile = global_session->findProfile("spirv_1_5");
 
-    session_desc = {};
-    target_desc = {};
+  session_desc.targetCount = 1;
+  session_desc.targets = &target_desc;
 
-    target_desc.format = SLANG_SPIRV;
-    target_desc.profile = global_session->findProfile("spirv_1_5");
+  std::array<slang::CompilerOptionEntry, 1> options = {
+      {slang::CompilerOptionName::EmitSpirvDirectly,
+       {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
+  session_desc.compilerOptionEntries = options.data();
+  session_desc.compilerOptionEntryCount = options.size();
 
-    session_desc.targetCount = 1;
-    session_desc.targets = &target_desc;
+  std::array<const char *, 1> search_paths = {shader_path.c_str()};
 
-    std::array<slang::CompilerOptionEntry, 1> options = {
-        {slang::CompilerOptionName::EmitSpirvDirectly,
-         {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
-    session_desc.compilerOptionEntries = options.data();
-    session_desc.compilerOptionEntryCount = options.size();
+  session_desc.searchPathCount = search_paths.size();
+  session_desc.searchPaths = search_paths.data();
 
-    std::array<const char *, 1> search_paths = {shader_path.c_str()};
+  global_session->createSession(session_desc, session.writeRef());
 
-    session_desc.searchPathCount = search_paths.size();
-    session_desc.searchPaths = search_paths.data();
-
-    global_session->createSession(session_desc, session.writeRef());
-
-    // Force recompilation
-    Slang::ComPtr<slang::IModule> new_module;
-    new_module = session->loadModule(module->getName());
-
-    uint64_t res = createRenderPipeline(p.pipeline_data, module->getName(),
+  for (auto &p : changed_pipelines_to_reload) {
+    uint64_t res = createRenderPipeline(p.pipeline_data, p.name,
                                         p.has_pixel_entry, p.index);
 
     if (res != UINT64_MAX) {

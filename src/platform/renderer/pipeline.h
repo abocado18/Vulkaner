@@ -11,6 +11,8 @@
 #include "slang-com-ptr.h"
 #include "slang.h"
 
+#include <optional>
+
 namespace pipeline {
 
 struct PipelineData {
@@ -51,6 +53,8 @@ struct CachedPipelineForHotReload {
 
   RenderPipeline pipeline;
   std::string last_changed_time;
+  std::string name;
+  std::string path;
   PipelineData pipeline_data;
   bool has_pixel_entry;
   uint64_t index;
@@ -65,7 +69,8 @@ public:
 
   uint64_t createRenderPipeline(PipelineData &pipeline_data,
                                 const std::string &shader_name,
-                                bool has_pixel_entry = true, uint64_t pipeline_index = UINT64_MAX);
+                                bool has_pixel_entry = true,
+                                uint64_t pipeline_index = UINT64_MAX);
 
   inline RenderPipeline getPipeline(uint64_t key) { return pipelines.at(key); }
 
@@ -73,13 +78,14 @@ public:
     return pipelines.at(name_to_pipeline.at(name));
   }
 
-  #ifndef PRODUCTION_BUILD
+#ifndef PRODUCTION_BUILD
 
   void reload();
 
-  std::unordered_map<std::string, CachedPipelineForHotReload> pipelines_for_reload = {};
+  std::unordered_map<std::string, CachedPipelineForHotReload>
+      pipelines_for_reload = {};
 
-  #endif
+#endif
 
 private:
   VkDevice &device;
@@ -94,8 +100,9 @@ private:
   std::unordered_map<uint64_t, RenderPipeline> pipelines = {};
   std::unordered_map<std::string, uint64_t> name_to_pipeline = {};
 
-  VkShaderModule createShaderModule(const std::string &name,
-                                    const std::string &entry_point_name);
+  std::optional<VkShaderModule>
+  createShaderModule(const std::string &name,
+                     const std::string &entry_point_name);
 };
 
 } // namespace pipeline
