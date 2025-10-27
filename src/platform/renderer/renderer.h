@@ -52,9 +52,9 @@ private:
   VkSurfaceKHR surface;
   Swapchain swapchain;
 
-  resource_handler::ResourceHandler resource_handler;
 
   pipeline::PipelineManager *pipeline_manager;
+  resource_handler::ResourceHandler * resource_handler;
 
   VmaAllocator vma_allocator;
 

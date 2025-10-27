@@ -12,8 +12,7 @@
 #include <vulkan/vulkan_core.h>
 
 render::RenderContext::RenderContext(uint32_t width, uint32_t height,
-                                     const std::string &shader_path)
-    : resource_handler({}) {
+                                     const std::string &shader_path) {
 
   if (glfwInit() == GLFW_FALSE) {
     std::cerr << "Could not init GLFW\n";
@@ -167,6 +166,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
           VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+          VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
 
       };
 
@@ -236,8 +236,19 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
         VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
         VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 
     };
+
+    VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexing_features = {};
+    indexing_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+
+    indexing_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    indexing_features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+    indexing_features.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+    indexing_features.descriptorBindingPartiallyBound = VK_TRUE;
+    indexing_features.descriptorBindingVariableDescriptorCount = VK_TRUE;
 
     VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_features = {};
     dynamic_features.sType =
@@ -251,7 +262,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 
     // Chain together
     dynamic_features.pNext = &sync_features;
-    sync_features.pNext = nullptr;
+    sync_features.pNext = &indexing_features;
+    indexing_features.pNext = nullptr;
 
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -291,6 +303,10 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     vmaImportVulkanFunctionsFromVolk(&create_info, &vma_vulkan_func);
 
     VK_ERROR(vmaCreateAllocator(&create_info, &this->vma_allocator));
+  }
+
+  {
+    resource_handler = new resource_handler::ResourceHandler(device);
   }
 
   {
@@ -355,6 +371,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 render::RenderContext::~RenderContext() {
 
   delete pipeline_manager;
+  delete resource_handler;
 
   vkDeviceWaitIdle(device);
 
@@ -390,11 +407,11 @@ bool render::RenderContext::windowShouldClose() const {
 
 void render::RenderContext::update() {
   glfwPollEvents();
-  #ifndef PRODUCTION_BUILD
+#ifndef PRODUCTION_BUILD
 
   pipeline_manager->reload();
 
-  #endif
+#endif
 
   render();
 }
@@ -447,7 +464,7 @@ void render::RenderContext::render() {
       transistion_data.data.image_data.image_layout =
           resource_handler::COLOR_ATTACHMENT_OPTIMAL;
 
-      resource_handler.updateTransistion(
+      resource_handler->updateTransistion(
           primary_command_buffer, transistion_data,
           swapchain.resource_image_indices[swapchain_image_index]);
     }
@@ -499,7 +516,7 @@ void render::RenderContext::render() {
     transistion_data.data.image_data.image_layout =
         resource_handler::PRESENT_SRC_KHR;
 
-    resource_handler.updateTransistion(
+    resource_handler->updateTransistion(
         primary_command_buffer, transistion_data,
         swapchain.resource_image_indices[swapchain_image_index]);
   }
@@ -666,7 +683,7 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
     resource.resource_data.image.range.levelCount = 1;
 
     swapchain.resource_image_indices[i] =
-        resource_handler.insertResource(resource);
+        resource_handler->insertResource(resource);
   }
 
   if (has_old_swapchain) {

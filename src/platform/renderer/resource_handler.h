@@ -181,6 +181,11 @@ struct Buffer {
   BufferAccessMasks current_access_mask;
 };
 
+struct Descriptor {
+  VkDescriptorSetLayout layout;
+  VkDescriptorSet descriptor;
+};
+
 struct Resource {
 
   ResourceType type;
@@ -193,9 +198,10 @@ struct Resource {
 
 class ResourceHandler {
 public:
-  ResourceHandler();
+  ResourceHandler(VkDevice &device);
   ~ResourceHandler();
 
+  // Use this for barriers for resources
   void updateTransistion(VkCommandBuffer command_buffer,
                          TransistionData transistion_data,
                          uint64_t resource_idx);
@@ -204,6 +210,12 @@ public:
 
 private:
   std::unordered_map<uint64_t, Resource> resources = {};
+
+  VkDevice &device;
+
+  Descriptor sampled_images_descriptor;
+
+
 };
 
 } // namespace resource_handler
