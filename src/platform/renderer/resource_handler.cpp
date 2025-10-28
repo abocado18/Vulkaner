@@ -2,8 +2,10 @@
 #include "vulkan_macros.h"
 #include <vulkan/vulkan_core.h>
 
-resource_handler::ResourceHandler::ResourceHandler(VkDevice &device)
-    : device(device) {
+resource_handler::ResourceHandler::ResourceHandler(VkPhysicalDevice &ph_device,
+                                                   VkDevice &device,
+                                                   VmaAllocator &allocator)
+    : device(device), allocator(allocator) {
 
   VkDescriptorSetLayoutBinding binding{};
   binding.binding = 0;
@@ -34,6 +36,52 @@ resource_handler::ResourceHandler::ResourceHandler(VkDevice &device)
 
   VK_ERROR(vkCreateDescriptorSetLayout(device, &set_layout_create_info, nullptr,
                                        &sampled_images_descriptor.layout));
+
+  VkPhysicalDeviceProperties properties;
+  vkGetPhysicalDeviceProperties(ph_device, &properties);
+
+  sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
+
+  VkDescriptorPoolSize pool_size = {};
+  pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  pool_size.descriptorCount = sampled_images_limit;
+
+  VkDescriptorPoolCreateInfo pool_create_info = {};
+  pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_create_info.maxSets = 1;
+  pool_create_info.poolSizeCount = 1;
+  pool_create_info.pPoolSizes = &pool_size;
+  pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+
+  VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
+                                  &sampled_images_descriptor.pool));
+
+  VkDescriptorSetAllocateInfo allocate_info = {};
+  allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocate_info.descriptorPool = sampled_images_descriptor.pool;
+  allocate_info.descriptorSetCount = 1;
+  allocate_info.pSetLayouts = &sampled_images_descriptor.layout;
+
+  VK_ERROR(vkAllocateDescriptorSets(device, &allocate_info,
+                                    &sampled_images_descriptor.descriptor));
+
+  {
+    // Create Staging Buffer
+    VkBufferCreateInfo buffer_create_info = {};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.size = 65536;
+    buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    VmaAllocationCreateInfo alloc_create_info = {};
+    alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO;
+    alloc_create_info.flags =
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VK_ERROR(vmaCreateBuffer(allocator, &buffer_create_info, &alloc_create_info,
+                             &staging_buffer.buffer, &staging_buffer.allocation,
+                             &staging_buffer.allocation_info));
+  }
 }
 
 resource_handler::ResourceHandler::~ResourceHandler() {
@@ -42,6 +90,10 @@ resource_handler::ResourceHandler::~ResourceHandler() {
 
   vkDestroyDescriptorSetLayout(device, sampled_images_descriptor.layout,
                                nullptr);
+
+  vkDestroyDescriptorPool(device, sampled_images_descriptor.pool, nullptr);
+
+  vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
 
 uint64_t resource_handler::ResourceHandler::insertResource(
@@ -105,3 +157,7 @@ void resource_handler::ResourceHandler::updateTransistion(
     // To do: Add Transisition Logic for Buffers
   }
 }
+
+uint64_t resource_handler::ResourceHandler::loadImage(
+    VkCommandBuffer command_buffer, const std::string &image_path,
+    ImageLayouts desired_image_layout) {}

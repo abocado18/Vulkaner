@@ -2,8 +2,14 @@
 
 #include "volk.h"
 
+#include <cstdint>
 #include <unordered_map>
+#include <string>
 #include <vulkan/vulkan_core.h>
+
+#include "allocator/vk_mem_alloc.h"
+
+#include "stb_image/stb_image.h"
 
 namespace resource_handler {
 
@@ -179,11 +185,14 @@ struct Image {
 struct Buffer {
   VkBuffer buffer;
   BufferAccessMasks current_access_mask;
+  VmaAllocationInfo allocation_info;
+  VmaAllocation allocation;
 };
 
 struct Descriptor {
   VkDescriptorSetLayout layout;
   VkDescriptorSet descriptor;
+  VkDescriptorPool pool;
 };
 
 struct Resource {
@@ -198,7 +207,8 @@ struct Resource {
 
 class ResourceHandler {
 public:
-  ResourceHandler(VkDevice &device);
+  ResourceHandler(VkPhysicalDevice &ph_device, VkDevice &device,
+                  VmaAllocator &allocator);
   ~ResourceHandler();
 
   // Use this for barriers for resources
@@ -208,14 +218,21 @@ public:
 
   uint64_t insertResource(Resource &resource);
 
+  uint64_t loadImage(VkCommandBuffer command_buffer,
+                     const std::string &image_path,
+                     ImageLayouts desired_image_layout);
+
 private:
   std::unordered_map<uint64_t, Resource> resources = {};
 
   VkDevice &device;
+  VmaAllocator &allocator;
+
+  Buffer staging_buffer;
 
   Descriptor sampled_images_descriptor;
 
-
+  uint32_t sampled_images_limit;
 };
 
 } // namespace resource_handler
