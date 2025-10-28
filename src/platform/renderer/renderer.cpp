@@ -307,7 +307,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 
   {
     resource_handler = new resource_handler::ResourceHandler(
-        physical_device, device, vma_allocator);
+        physical_device, device, vma_allocator, graphics_queue_index);
   }
 
   {

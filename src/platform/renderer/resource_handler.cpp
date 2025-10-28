@@ -1,11 +1,15 @@
 #include "resource_handler.h"
+#include "stb_image/stb_image.h"
 #include "vulkan_macros.h"
+#include <cstdint>
+#include <cstring>
 #include <vulkan/vulkan_core.h>
 
-resource_handler::ResourceHandler::ResourceHandler(VkPhysicalDevice &ph_device,
-                                                   VkDevice &device,
-                                                   VmaAllocator &allocator)
-    : device(device), allocator(allocator) {
+resource_handler::ResourceHandler::ResourceHandler(
+    VkPhysicalDevice &ph_device, VkDevice &device, VmaAllocator &allocator,
+    uint32_t graphics_queue_index)
+    : device(device), allocator(allocator),
+      graphics_queue_index(graphics_queue_index) {
 
   VkDescriptorSetLayoutBinding binding{};
   binding.binding = 0;
@@ -81,6 +85,8 @@ resource_handler::ResourceHandler::ResourceHandler(VkPhysicalDevice &ph_device,
     VK_ERROR(vmaCreateBuffer(allocator, &buffer_create_info, &alloc_create_info,
                              &staging_buffer.buffer, &staging_buffer.allocation,
                              &staging_buffer.allocation_info));
+
+    staging_buffer.offset = 0;
   }
 }
 
@@ -158,6 +164,111 @@ void resource_handler::ResourceHandler::updateTransistion(
   }
 }
 
-uint64_t resource_handler::ResourceHandler::loadImage(
+uint64_t resource_handler::ResourceHandler::recordloadImageCommand(
     VkCommandBuffer command_buffer, const std::string &image_path,
-    ImageLayouts desired_image_layout) {}
+    ImageLayouts desired_image_layout, VkImageUsageFlags image_usage,
+    VkFormat image_format) {
+
+  uint64_t resource_index = UINT64_MAX;
+
+  int width, height, channels;
+
+  stbi_uc *pixels =
+      stbi_load(image_path.c_str(), &width, &height, &channels, 4);
+
+  if (!pixels) {
+    std::cerr << "No file found\n";
+    return UINT64_MAX;
+  }
+
+  {
+
+    Image new_image = {};
+    new_image.current_layout = ImageLayouts::UNDEFINED;
+    new_image.range.layerCount = 1;
+    new_image.range.levelCount = 1;
+    new_image.range.baseMipLevel = 0;
+    new_image.range.baseArrayLayer = 0;
+    new_image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    VkImageCreateInfo image_create_info = {};
+    image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.usage = image_usage;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_create_info.queueFamilyIndexCount = 1;
+    image_create_info.pQueueFamilyIndices = &graphics_queue_index;
+    image_create_info.extent = {static_cast<uint32_t>(width),
+                                static_cast<uint32_t>(height), 1};
+
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_create_info.arrayLayers = 1;
+    image_create_info.format = image_format;
+    image_create_info.mipLevels = 1;
+
+    VmaAllocationCreateInfo allocation_create_info = {};
+    allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
+    allocation_create_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    vmaCreateImage(allocator, &image_create_info, &allocation_create_info,
+                   &new_image.image, &new_image.allocation,
+                   &new_image.allocation_info);
+
+    Resource new_resource = {};
+    new_resource.type = ResourceType::IMAGE;
+    new_resource.resource_data.image = new_image;
+
+    resource_index = insertResource(new_resource);
+  }
+
+  std::memcpy(
+      reinterpret_cast<uint8_t *>(staging_buffer.allocation_info.pMappedData) +
+          staging_buffer.offset,
+      pixels, width * height * 4);
+
+  TransistionData transistion_data = {};
+  transistion_data.type = ResourceType::IMAGE;
+  transistion_data.data.image_data.image_layout =
+      ImageLayouts::TRANSFER_DST_OPTIMAL;
+
+  updateTransistion(command_buffer, transistion_data, resource_index);
+
+  auto &r = resources[resource_index];
+
+  VkBufferImageCopy2 region = {};
+  region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
+  region.imageSubresource.aspectMask = r.resource_data.image.range.aspectMask;
+  region.imageSubresource.baseArrayLayer =
+      r.resource_data.image.range.baseArrayLayer;
+  region.imageSubresource.layerCount = r.resource_data.image.range.layerCount;
+  region.imageSubresource.mipLevel = r.resource_data.image.range.baseMipLevel;
+  region.imageOffset = {0, 0, 0};
+  region.imageExtent = {static_cast<uint32_t>(width),
+                        static_cast<uint32_t>(height), 1};
+
+  region.bufferOffset = staging_buffer.offset;
+
+  VkCopyBufferToImageInfo2 copy_image_info = {};
+  copy_image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2;
+  copy_image_info.srcBuffer = staging_buffer.buffer;
+  copy_image_info.regionCount = 1;
+  copy_image_info.pRegions = &region;
+  copy_image_info.dstImageLayout =
+      getImageLayout(r.resource_data.image.current_layout);
+  copy_image_info.dstImage = r.resource_data.image.image;
+
+  vkCmdCopyBufferToImage2KHR(command_buffer, &copy_image_info);
+
+  TransistionData second_transistion_data = {};
+  second_transistion_data.type = ResourceType::IMAGE;
+  second_transistion_data.data.image_data.image_layout = desired_image_layout;
+
+  updateTransistion(command_buffer, second_transistion_data, resource_index);
+  stbi_image_free(pixels);
+
+  staging_buffer.offset += width * height * 4;
+
+  return resource_index;
+}

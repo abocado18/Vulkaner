@@ -3,8 +3,9 @@
 #include "volk.h"
 
 #include <cstdint>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 #include "allocator/vk_mem_alloc.h"
@@ -180,6 +181,9 @@ struct Image {
   VkImage image;
   ImageLayouts current_layout;
   VkImageSubresourceRange range;
+
+  VmaAllocation allocation;
+  VmaAllocationInfo allocation_info;
 };
 
 struct Buffer {
@@ -187,6 +191,7 @@ struct Buffer {
   BufferAccessMasks current_access_mask;
   VmaAllocationInfo allocation_info;
   VmaAllocation allocation;
+  uint32_t offset = 0;
 };
 
 struct Descriptor {
@@ -203,12 +208,14 @@ struct Resource {
     Image image;
     Buffer buffer;
   } resource_data;
+
+  uint32_t binding_slot;
 };
 
 class ResourceHandler {
 public:
   ResourceHandler(VkPhysicalDevice &ph_device, VkDevice &device,
-                  VmaAllocator &allocator);
+                  VmaAllocator &allocator, uint32_t graphics_queue_index);
   ~ResourceHandler();
 
   // Use this for barriers for resources
@@ -218,11 +225,16 @@ public:
 
   uint64_t insertResource(Resource &resource);
 
-  uint64_t loadImage(VkCommandBuffer command_buffer,
-                     const std::string &image_path,
-                     ImageLayouts desired_image_layout);
+
+  uint64_t loadImage;
 
 private:
+  uint64_t recordloadImageCommand(VkCommandBuffer command_buffer,
+                                  const std::string &image_path,
+                                  ImageLayouts desired_image_layout,
+                                  VkImageUsageFlags image_usage,
+                                  VkFormat image_format);
+
   std::unordered_map<uint64_t, Resource> resources = {};
 
   VkDevice &device;
@@ -233,6 +245,10 @@ private:
   Descriptor sampled_images_descriptor;
 
   uint32_t sampled_images_limit;
+
+  uint32_t graphics_queue_index;
+
+  
 };
 
 } // namespace resource_handler
