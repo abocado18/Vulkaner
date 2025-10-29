@@ -1,4 +1,5 @@
 #include "pipeline.h"
+#include "resource_handler.h"
 #include "vertex.h"
 #include <array>
 #include <cassert>
@@ -16,8 +17,8 @@
 #include "vulkan_macros.h"
 
 pipeline::PipelineManager::PipelineManager(VkDevice &device,
-                                           const std::string &shader_path)
-    : shader_path(shader_path), device(device) {
+                                           const std::string &shader_path, resource_handler::ResourceHandler &resource_handler)
+    : shader_path(shader_path), device(device), resource_handler(resource_handler) {
 
   slang::createGlobalSession(global_session.writeRef());
 
@@ -184,11 +185,14 @@ uint64_t pipeline::PipelineManager::createRenderPipeline(
     shader_stage_create_infos[1].module = modules[1].value();
   }
 
+  
+
   VkPipelineLayoutCreateInfo layout_create_info = {};
   layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   layout_create_info.pushConstantRangeCount = 1;
   layout_create_info.pPushConstantRanges = &pipeline_data.push_constant_range;
-  layout_create_info.setLayoutCount = 0; // Add bindless descriptor sets later
+  layout_create_info.setLayoutCount = 1;
+  layout_create_info.pSetLayouts = &resource_handler.getSampledImagesDescriptor().layout;
 
   VK_ERROR(vkCreatePipelineLayout(device, &layout_create_info, nullptr,
                                   &pipeline.layout));

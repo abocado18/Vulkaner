@@ -178,10 +178,8 @@ struct TransistionData {
     TransistionImageData image_data;
   } data;
 
-
   uint32_t source_queue_family = VK_QUEUE_FAMILY_IGNORED;
   uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED;
-
 };
 
 struct Image {
@@ -225,20 +223,16 @@ struct Resource {
     Image image;
     Buffer buffer;
   } resource_data;
-
- 
 };
 
 struct StagingTransferData {
 
-
   Resource *target;
+  uint64_t resource_idx;
 
   uint32_t source_offset;
   uint32_t target_offset;
   uint32_t size;
-
-  
 };
 
 class ResourceHandler {
@@ -254,7 +248,8 @@ public:
 
   uint64_t insertResource(Resource &resource);
 
-  uint64_t loadImage(const std::string &path, VkFormat image_format, VkImageUsageFlags image_usage);
+  uint64_t loadImage(const std::string &path, VkFormat image_format,
+                     VkImageUsageFlags image_usage);
 
   uint64_t bindSampledImage(uint64_t resource_idx);
 
@@ -262,14 +257,13 @@ public:
 
   void clearStagingTransferData();
 
-  const VkBuffer &getStagingBuffer()
-  {
-    return staging_buffer.buffer;
+  const VkBuffer &getStagingBuffer() { return staging_buffer.buffer; }
+
+  const Descriptor &getSampledImagesDescriptor() const {
+    return sampled_images_descriptor;
   }
 
 private:
-  
-
   std::unordered_map<uint64_t, Resource> resources = {};
 
   VkDevice &device;
@@ -285,21 +279,16 @@ private:
 
   std::vector<StagingTransferData> transfers;
 
-
-  uint64_t getNewSampledImageBindingSlot()
-  {
+  uint64_t getNewSampledImageBindingSlot() {
     static uint64_t new_slot = 0;
 
-    if(new_slot > sampled_images_limit)
-    {
+    if (new_slot > sampled_images_limit) {
       std::cerr << "Max value for sampled images readched\n";
       return UINT64_MAX;
     }
 
     return new_slot++;
   }
-
-  
 };
 
 } // namespace resource_handler

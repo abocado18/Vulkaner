@@ -8,6 +8,8 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
+#include "resource_handler.h"
+
 #include "slang-com-ptr.h"
 #include "slang.h"
 
@@ -64,7 +66,8 @@ struct CachedPipelineForHotReload {
 
 class PipelineManager {
 public:
-  PipelineManager(VkDevice &device, const std::string &shader_path);
+  PipelineManager(VkDevice &device, const std::string &shader_path,
+                  resource_handler::ResourceHandler &resource_handler);
   ~PipelineManager();
 
   uint64_t createRenderPipeline(PipelineData &pipeline_data,
@@ -89,6 +92,8 @@ public:
 
 private:
   VkDevice &device;
+
+  resource_handler::ResourceHandler &resource_handler;
 
   std::string shader_path;
 

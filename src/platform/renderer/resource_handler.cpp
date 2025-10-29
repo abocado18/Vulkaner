@@ -12,10 +12,15 @@ resource_handler::ResourceHandler::ResourceHandler(
     : device(device), allocator(allocator),
       transfer_queue_index(transfer_queue_index) {
 
+  VkPhysicalDeviceProperties properties;
+  vkGetPhysicalDeviceProperties(ph_device, &properties);
+
+  sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
+
   VkDescriptorSetLayoutBinding binding{};
   binding.binding = 0;
   binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  binding.descriptorCount = 1;
+  binding.descriptorCount = sampled_images_limit;
   binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
   binding.pImmutableSamplers = nullptr;
 
@@ -42,11 +47,6 @@ resource_handler::ResourceHandler::ResourceHandler(
   VK_ERROR(vkCreateDescriptorSetLayout(device, &set_layout_create_info, nullptr,
                                        &sampled_images_descriptor.layout));
 
-  VkPhysicalDeviceProperties properties;
-  vkGetPhysicalDeviceProperties(ph_device, &properties);
-
-  sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
-
   VkDescriptorPoolSize pool_size = {};
   pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   pool_size.descriptorCount = sampled_images_limit;
@@ -61,11 +61,21 @@ resource_handler::ResourceHandler::ResourceHandler(
   VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
                                   &sampled_images_descriptor.pool));
 
+  uint32_t variableDescriptorCount = sampled_images_limit;
+
+  VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variable_count_info{};
+  variable_count_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+  variable_count_info.descriptorSetCount = 1;
+  variable_count_info.pDescriptorCounts = &variableDescriptorCount;
+  variable_count_info.pNext = nullptr;
+
   VkDescriptorSetAllocateInfo allocate_info = {};
   allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocate_info.descriptorPool = sampled_images_descriptor.pool;
   allocate_info.descriptorSetCount = 1;
   allocate_info.pSetLayouts = &sampled_images_descriptor.layout;
+  allocate_info.pNext = &variable_count_info;
 
   VK_ERROR(vkAllocateDescriptorSets(device, &allocate_info,
                                     &sampled_images_descriptor.descriptor));
@@ -74,7 +84,7 @@ resource_handler::ResourceHandler::ResourceHandler(
     // Create Staging Buffer
     VkBufferCreateInfo buffer_create_info = {};
     buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_create_info.size = 65536;
+    buffer_create_info.size = 65'536'000;
     buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
     VmaAllocationCreateInfo alloc_create_info = {};
@@ -197,7 +207,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     VkImageCreateInfo image_create_info = {};
     image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_create_info.imageType = VK_IMAGE_TYPE_2D;
-    image_create_info.usage = image_usage;
+    image_create_info.usage = image_usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     image_create_info.queueFamilyIndexCount = 1;
@@ -224,6 +234,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view_create_info.image = new_image.image;
     view_create_info.subresourceRange = new_image.range;
+    view_create_info.format = image_format;
 
     VK_ERROR(vkCreateImageView(this->device, &view_create_info, nullptr,
                                &new_image.view));
@@ -234,7 +245,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
       sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
       sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
       sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-      sampler_create_info.anisotropyEnable = VK_TRUE;
+      sampler_create_info.anisotropyEnable = VK_FALSE;
       sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
       sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
       sampler_create_info.compareEnable = VK_FALSE;
@@ -266,6 +277,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     transfer_data.size = width * height * 4;
     transfer_data.target = &resources.at(resource_index);
     transfer_data.target_offset = 0;
+    transfer_data.resource_idx = resource_index;
   }
 
   {
@@ -299,7 +311,7 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
 
   Resource &r = it->second;
 
-  if (r.type == ResourceType::IMAGE) {
+  if (r.type != ResourceType::IMAGE) {
     return UINT64_MAX;
   }
 
@@ -323,6 +335,7 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
   write.dstArrayElement = binding_slot;
   write.dstBinding = 0;
   write.dstSet = sampled_images_descriptor.descriptor;
+
   write.pImageInfo = &image_info;
 
   vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);

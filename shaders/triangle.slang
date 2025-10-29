@@ -1,7 +1,11 @@
 struct VSOut
 {
     float4 position : SV_Position;
+    float2 uv;
 };
+
+[vk_binding(0, 0)]
+Sampler2D<float4> sampled_textures[];
 
 [shader("vertex")]
 VSOut vertexMain(uint id : SV_VertexID)
@@ -13,13 +17,22 @@ VSOut vertexMain(uint id : SV_VertexID)
         float4( 0.0,  -0.5, 0, 1)
     };
 
+      float2 uvs[3] = {
+        float2(0,1),
+        float2(1,1),
+        float2(0.5, 0)
+    };
+
     VSOut output;
     output.position = positions[id];
+    output.uv = uvs[id];
     return output;
 }
 
 [shader("fragment")]
 float4 pixelMain(VSOut input) : SV_Target
 {
-    return float4(1, 0, 0, 1); // red triangle
+    Sampler2D tex = sampled_textures[0];
+    float3 rgb = tex.Sample(input.uv).rgb;
+    return float4(rgb * float3(1.0, 0.0, 0.0), 1); // red triangle
 }

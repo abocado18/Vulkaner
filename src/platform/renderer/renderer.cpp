@@ -166,7 +166,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
           VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-          VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+          VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+          VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
 
       };
 
@@ -261,6 +262,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
         VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
 
     };
 
@@ -273,6 +275,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     indexing_features.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
     indexing_features.descriptorBindingPartiallyBound = VK_TRUE;
     indexing_features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    indexing_features.runtimeDescriptorArray = VK_TRUE;
 
     VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_features = {};
     dynamic_features.sType =
@@ -289,6 +292,10 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     sync_features.pNext = &indexing_features;
     indexing_features.pNext = nullptr;
 
+    VkPhysicalDeviceFeatures ph_features = {};
+    ph_features.robustBufferAccess = VK_TRUE;
+    
+
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     create_info.enabledExtensionCount = device_extensions.size();
@@ -297,6 +304,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.queueCreateInfoCount = queue_create_infos.size();
     create_info.pQueueCreateInfos = queue_create_infos.data();
     create_info.pNext = &dynamic_features;
+    create_info.pEnabledFeatures = &ph_features;
 
     VK_ERROR(vkCreateDevice(this->physical_device, &create_info, nullptr,
                             &this->device));
@@ -409,7 +417,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
   }
 
   {
-    pipeline_manager = new pipeline::PipelineManager(device, shader_path);
+    pipeline_manager = new pipeline::PipelineManager(device, shader_path, *resource_handler);
   }
 
   {
@@ -420,6 +428,10 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     pipeline_data.vertex_desc.binding_descs.clear();
 
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
+
+    resource_handler->loadImage(SHADER_PATH "/zelda.jpg",
+                                VK_FORMAT_R8G8B8A8_UNORM,
+                                VK_IMAGE_USAGE_SAMPLED_BIT);
   }
 }
 
@@ -544,20 +556,52 @@ void render::RenderContext::render() {
         VkCopyBufferToImageInfo2KHR image_info = {};
         image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR;
         image_info.dstImage = t.target->resource_data.image.image;
-        image_info.dstImageLayout = resource_handler::getImageLayout(
-            t.target->resource_data.image.current_layout);
+        image_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
         image_info.regionCount = 1;
         image_info.pRegions = &region;
         image_info.srcBuffer = resource_handler->getStagingBuffer();
 
+        assert(vkCmdCopyBufferToImage2KHR != nullptr);
+
+        assert(t.target != nullptr);
+        assert(t.target->resource_data.image.image != VK_NULL_HANDLE);
+        assert(t.target->resource_data.image.extent.width > 0);
+        assert(t.target->resource_data.image.extent.height > 0);
+        assert(t.target->resource_data.image.extent.depth > 0);
+        assert(resource_handler->getStagingBuffer() != VK_NULL_HANDLE);
+
+        {
+          resource_handler::TransistionData transistion_data = {};
+          transistion_data.data.image_data.image_layout =
+              resource_handler::ImageLayouts::TRANSFER_DST_OPTIMAL;
+          transistion_data.type = resource_handler::ResourceType::IMAGE;
+
+          resource_handler->updateTransistion(transfer_command_buffer,
+                                              transistion_data, t.resource_idx);
+        }
+
         vkCmdCopyBufferToImage2KHR(transfer_command_buffer, &image_info);
+
+        {
+          resource_handler::TransistionData transistion_data = {};
+          transistion_data.data.image_data.image_layout =
+              resource_handler::ImageLayouts::SHADER_READ_ONLY_OPTIMAL;
+          transistion_data.type = resource_handler::ResourceType::IMAGE;
+          transistion_data.source_queue_family = transfer_queue_index;
+          transistion_data.dst_queue_family = graphics_queue_index;
+
+          resource_handler->updateTransistion(transfer_command_buffer,
+                                              transistion_data, t.resource_idx);
+        }
 
       } else {
 
         // To do: Implmemet buffer transfer
       }
     }
+
+    this->resource_handler->clearStagingTransferData();
 
     vkEndCommandBuffer(transfer_command_buffer);
 
@@ -636,6 +680,11 @@ void render::RenderContext::render() {
     VkRect2D scissor = {};
     scissor.extent = swapchain.extent;
     scissor.offset = {0, 0};
+
+    vkCmdBindDescriptorSets(
+        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline_manager->getPipelineByName("triangle").layout, 0, 1,
+        &resource_handler->getSampledImagesDescriptor().descriptor, 0, nullptr);
 
     vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
