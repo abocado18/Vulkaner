@@ -3,8 +3,10 @@
 #include "volk.h"
 
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -187,8 +189,15 @@ struct Image {
   ImageLayouts current_layout;
   VkImageSubresourceRange range;
 
+  VkExtent3D extent;
+
   VmaAllocation allocation;
   VmaAllocationInfo allocation_info;
+
+  VkImageView view;
+
+  VkSampler sampler;
+  uint64_t sampled_image_binding_slot = UINT64_MAX;
 };
 
 struct Buffer {
@@ -217,7 +226,7 @@ struct Resource {
     Buffer buffer;
   } resource_data;
 
-  uint32_t binding_slot;
+ 
 };
 
 struct StagingTransferData {
@@ -228,6 +237,8 @@ struct StagingTransferData {
   uint32_t source_offset;
   uint32_t target_offset;
   uint32_t size;
+
+  
 };
 
 class ResourceHandler {
@@ -245,11 +256,16 @@ public:
 
   uint64_t loadImage(const std::string &path, VkFormat image_format, VkImageUsageFlags image_usage);
 
-  uint64_t bindImage();
+  uint64_t bindSampledImage(uint64_t resource_idx);
 
   std::vector<StagingTransferData> &getStagingTransferData();
 
   void clearStagingTransferData();
+
+  const VkBuffer &getStagingBuffer()
+  {
+    return staging_buffer.buffer;
+  }
 
 private:
   
@@ -268,6 +284,22 @@ private:
   uint32_t transfer_queue_index;
 
   std::vector<StagingTransferData> transfers;
+
+
+  uint64_t getNewSampledImageBindingSlot()
+  {
+    static uint64_t new_slot = 0;
+
+    if(new_slot > sampled_images_limit)
+    {
+      std::cerr << "Max value for sampled images readched\n";
+      return UINT64_MAX;
+    }
+
+    return new_slot++;
+  }
+
+  
 };
 
 } // namespace resource_handler

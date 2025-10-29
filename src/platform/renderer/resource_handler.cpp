@@ -191,6 +191,8 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     new_image.range.baseMipLevel = 0;
     new_image.range.baseArrayLayer = 0;
     new_image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    new_image.extent = {static_cast<uint32_t>(width),
+                        static_cast<uint32_t>(height), 1};
 
     VkImageCreateInfo image_create_info = {};
     image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -213,9 +215,39 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
     allocation_create_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    vmaCreateImage(allocator, &image_create_info, &allocation_create_info,
-                   &new_image.image, &new_image.allocation,
-                   &new_image.allocation_info);
+    VK_ERROR(vmaCreateImage(allocator, &image_create_info,
+                            &allocation_create_info, &new_image.image,
+                            &new_image.allocation, &new_image.allocation_info));
+
+    VkImageViewCreateInfo view_create_info = {};
+    view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_create_info.image = new_image.image;
+    view_create_info.subresourceRange = new_image.range;
+
+    VK_ERROR(vkCreateImageView(this->device, &view_create_info, nullptr,
+                               &new_image.view));
+
+    {
+      VkSamplerCreateInfo sampler_create_info = {};
+      sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+      sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+      sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+      sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+      sampler_create_info.anisotropyEnable = VK_TRUE;
+      sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+      sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+      sampler_create_info.compareEnable = VK_FALSE;
+      sampler_create_info.compareOp = VK_COMPARE_OP_NEVER;
+      sampler_create_info.magFilter = VK_FILTER_LINEAR;
+      sampler_create_info.maxAnisotropy = 1.0f;
+      sampler_create_info.maxLod = 0.0f;
+      sampler_create_info.minFilter = VK_FILTER_LINEAR;
+      sampler_create_info.mipLodBias = 0.0f;
+
+      VK_ERROR(vkCreateSampler(this->device, &sampler_create_info, nullptr,
+                               &new_image.sampler));
+    }
 
     Resource new_resource = {};
     new_resource.type = ResourceType::IMAGE;
@@ -242,6 +274,8 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
 
   this->transfers.push_back(transfer_data);
 
+  bindSampledImage(resource_index);
+
   return resource_index;
 }
 
@@ -252,4 +286,47 @@ void resource_handler::ResourceHandler::clearStagingTransferData() {
 std::vector<resource_handler::StagingTransferData> &
 resource_handler::ResourceHandler::getStagingTransferData() {
   return transfers;
+}
+
+uint64_t
+resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
+
+  auto it = resources.find(resource_index);
+
+  if (it == resources.end()) {
+    return UINT64_MAX;
+  }
+
+  Resource &r = it->second;
+
+  if (r.type == ResourceType::IMAGE) {
+    return UINT64_MAX;
+  }
+
+  if (r.resource_data.image.sampled_image_binding_slot != UINT64_MAX) {
+    // Already bound
+
+    return r.resource_data.image.sampled_image_binding_slot;
+  }
+
+  uint64_t binding_slot = getNewSampledImageBindingSlot();
+
+  VkDescriptorImageInfo image_info = {};
+  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  image_info.imageView = r.resource_data.image.view;
+  image_info.sampler = r.resource_data.image.sampler;
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  write.dstArrayElement = binding_slot;
+  write.dstBinding = 0;
+  write.dstSet = sampled_images_descriptor.descriptor;
+  write.pImageInfo = &image_info;
+
+  vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+  r.resource_data.image.sampled_image_binding_slot = binding_slot;
+  return binding_slot;
 }

@@ -351,7 +351,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.queueFamilyIndex = graphics_queue_index;
     create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr, &graphics_command_pool));
+    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr,
+                                 &graphics_command_pool));
 
     VkCommandBufferAllocateInfo allocate_info = {};
     allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -369,7 +370,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.queueFamilyIndex = transfer_queue_index;
     create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr, &transfer_command_pool));
+    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr,
+                                 &transfer_command_pool));
 
     VkCommandBufferAllocateInfo allocate_info = {};
     allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -387,8 +389,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     VK_ERROR(vkCreateSemaphore(device, &create_info, nullptr,
                                &aquire_image_semaphore));
 
-
-    VK_ERROR(vkCreateSemaphore(device, &create_info, nullptr, &transfer_finished_semaphore));
+    VK_ERROR(vkCreateSemaphore(device, &create_info, nullptr,
+                               &transfer_finished_semaphore));
 
     rendering_finished_semaphores.resize(swapchain.images.size());
 
@@ -502,14 +504,86 @@ void render::RenderContext::render() {
     }
 
     createSwapchain(true, swapchain);
+    return;
   }
 
   vkResetFences(device, 1, &fence);
   vkResetCommandPool(device, graphics_command_pool, 0);
   vkResetCommandPool(device, transfer_command_pool, 0);
 
+  // Record Command Buffers
 
-  //Record Command Buffers
+  {
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    std::vector<resource_handler::StagingTransferData> &transfer_data =
+        resource_handler->getStagingTransferData();
+
+    VK_ERROR(vkBeginCommandBuffer(transfer_command_buffer, &begin_info));
+
+    for (auto &t : transfer_data) {
+      if (t.target->type == resource_handler::ResourceType::IMAGE) {
+
+        VkBufferImageCopy2KHR region = {};
+        region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2_KHR;
+        region.imageSubresource.aspectMask =
+            t.target->resource_data.image.range.aspectMask;
+        region.imageSubresource.baseArrayLayer =
+            t.target->resource_data.image.range.baseArrayLayer;
+        region.imageSubresource.layerCount =
+            t.target->resource_data.image.range.layerCount;
+        region.imageSubresource.mipLevel =
+            t.target->resource_data.image.range.baseMipLevel;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = t.target->resource_data.image.extent;
+
+        region.bufferOffset = t.source_offset;
+
+        VkCopyBufferToImageInfo2KHR image_info = {};
+        image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR;
+        image_info.dstImage = t.target->resource_data.image.image;
+        image_info.dstImageLayout = resource_handler::getImageLayout(
+            t.target->resource_data.image.current_layout);
+
+        image_info.regionCount = 1;
+        image_info.pRegions = &region;
+        image_info.srcBuffer = resource_handler->getStagingBuffer();
+
+        vkCmdCopyBufferToImage2KHR(transfer_command_buffer, &image_info);
+
+      } else {
+
+        // To do: Implmemet buffer transfer
+      }
+    }
+
+    vkEndCommandBuffer(transfer_command_buffer);
+
+    VkSemaphoreSubmitInfoKHR signal_submit_info = {};
+    signal_submit_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
+    signal_submit_info.semaphore = transfer_finished_semaphore;
+    signal_submit_info.stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+    signal_submit_info.deviceIndex = 0;
+    signal_submit_info.value = 0;
+
+    VkCommandBufferSubmitInfoKHR submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO_KHR;
+    submit_info.commandBuffer = transfer_command_buffer;
+    submit_info.deviceMask = 0;
+
+    VkSubmitInfo2KHR submit = {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR;
+    submit.waitSemaphoreInfoCount = 0;
+    submit.pWaitSemaphoreInfos = nullptr;
+    submit.signalSemaphoreInfoCount = 1;
+    submit.pSignalSemaphoreInfos = &signal_submit_info;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &submit_info;
+
+    VK_ERROR(vkQueueSubmit2KHR(transfer_queue, 1, &submit, 0));
+  }
 
   VkCommandBufferBeginInfo begin_info = {};
   begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -584,13 +658,33 @@ void render::RenderContext::render() {
 
   vkEndCommandBuffer(graphics_command_buffer);
 
-  VkSemaphoreSubmitInfoKHR wait_submit_info = {};
-  wait_submit_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
-  wait_submit_info.semaphore = aquire_image_semaphore;
-  wait_submit_info.stageMask =
+  std::array<VkSemaphore, 2> wait_semaphores = {
+      aquire_image_semaphore,
+      transfer_finished_semaphore,
+  };
+
+  VkSemaphoreSubmitInfoKHR wait_submit_info_1 = {};
+  wait_submit_info_1.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
+  wait_submit_info_1.semaphore = aquire_image_semaphore;
+  wait_submit_info_1.stageMask =
       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR;
-  wait_submit_info.deviceIndex = 0;
-  wait_submit_info.value = 0;
+  wait_submit_info_1.deviceIndex = 0;
+  wait_submit_info_1.value = 0;
+
+  VkSemaphoreSubmitInfoKHR wait_submit_info_2 = {};
+  wait_submit_info_2.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
+  wait_submit_info_2.semaphore = transfer_finished_semaphore;
+  wait_submit_info_2.stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+  wait_submit_info_2.deviceIndex = 0;
+  wait_submit_info_2.value = 0;
+
+  std::array<VkPipelineStageFlags2KHR, 2> wait_stage_masks = {
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+      VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR,
+  };
+
+  std::array<VkSemaphoreSubmitInfoKHR, 2> wait_submits = {wait_submit_info_1,
+                                                          wait_submit_info_2};
 
   VkSemaphoreSubmitInfoKHR signal_submit_info = {};
   signal_submit_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
@@ -607,8 +701,8 @@ void render::RenderContext::render() {
 
   VkSubmitInfo2KHR submit = {};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR;
-  submit.waitSemaphoreInfoCount = 1;
-  submit.pWaitSemaphoreInfos = &wait_submit_info;
+  submit.waitSemaphoreInfoCount = wait_submits.size();
+  submit.pWaitSemaphoreInfos = wait_submits.data();
   submit.signalSemaphoreInfoCount = 1;
   submit.pSignalSemaphoreInfos = &signal_submit_info;
   submit.commandBufferInfoCount = 1;
@@ -643,6 +737,7 @@ void render::RenderContext::render() {
     }
 
     createSwapchain(true, swapchain);
+    return;
   }
 }
 
