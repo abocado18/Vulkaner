@@ -192,6 +192,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
                                              queue_family_properties.data());
 
     bool found_graphics = false;
+    bool found_transfer = false;
 
     uint32_t index = 0;
 
@@ -202,6 +203,12 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
           found_graphics = true;
           this->graphics_queue_index = index;
         }
+
+        if (queue_family_property.queueFlags &
+            VkQueueFlagBits::VK_QUEUE_TRANSFER_BIT) {
+          found_transfer = true;
+          this->transfer_queue_index = index;
+        }
       }
 
       index++;
@@ -211,11 +218,17 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
       std::cout << "Could not find graphics queue\n";
       abort();
     }
+
+    if (found_transfer == false) {
+      std::cout << "Could not find transfer queue, use graphics queue as "
+                   "transfer queue\n";
+      transfer_queue_index = graphics_queue_index;
+    }
   }
 
   {
 
-    VkDeviceQueueCreateInfo queue_create_info = {};
+    std::vector<VkDeviceQueueCreateInfo> queue_create_infos = {};
 
     const float priority = 1.0f;
 
@@ -226,7 +239,18 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     graphics_queue_create_info.queueCount = 1;
     graphics_queue_create_info.queueFamilyIndex = this->graphics_queue_index;
 
-    queue_create_info = graphics_queue_create_info;
+    queue_create_infos.push_back(graphics_queue_create_info);
+
+    if (transfer_queue_index != graphics_queue_index) {
+      VkDeviceQueueCreateInfo transfer_queue_create_info = {};
+      transfer_queue_create_info.sType =
+          VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      transfer_queue_create_info.pQueuePriorities = &priority;
+      transfer_queue_create_info.queueCount = 1;
+      transfer_queue_create_info.queueFamilyIndex = transfer_queue_index;
+
+      queue_create_infos.push_back(transfer_queue_create_info);
+    }
 
     std::vector<const char *> device_extensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -270,8 +294,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.enabledExtensionCount = device_extensions.size();
     create_info.ppEnabledExtensionNames = device_extensions.data();
     create_info.enabledLayerCount = 0;
-    create_info.queueCreateInfoCount = 1;
-    create_info.pQueueCreateInfos = &queue_create_info;
+    create_info.queueCreateInfoCount = queue_create_infos.size();
+    create_info.pQueueCreateInfos = queue_create_infos.data();
     create_info.pNext = &dynamic_features;
 
     VK_ERROR(vkCreateDevice(this->physical_device, &create_info, nullptr,
@@ -287,6 +311,13 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 
     vkGetDeviceQueue(this->device, this->graphics_queue_index, 0,
                      &this->graphics_queue);
+  }
+
+  {
+    const float priority = 0.0f;
+
+    vkGetDeviceQueue(this->device, this->transfer_queue_index, 0,
+                     &this->transfer_queue);
   }
 
   {
@@ -307,7 +338,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 
   {
     resource_handler = new resource_handler::ResourceHandler(
-        physical_device, device, vma_allocator, graphics_queue_index);
+        physical_device, device, vma_allocator, transfer_queue_index);
   }
 
   {
@@ -320,16 +351,34 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.queueFamilyIndex = graphics_queue_index;
     create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr, &command_pool));
+    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr, &graphics_command_pool));
 
     VkCommandBufferAllocateInfo allocate_info = {};
     allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocate_info.commandPool = command_pool;
+    allocate_info.commandPool = graphics_command_pool;
     allocate_info.commandBufferCount = 1;
     allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
     VK_ERROR(vkAllocateCommandBuffers(device, &allocate_info,
-                                      &primary_command_buffer));
+                                      &graphics_command_buffer));
+  }
+
+  {
+    VkCommandPoolCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    create_info.queueFamilyIndex = transfer_queue_index;
+    create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+    VK_ERROR(vkCreateCommandPool(device, &create_info, nullptr, &transfer_command_pool));
+
+    VkCommandBufferAllocateInfo allocate_info = {};
+    allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocate_info.commandPool = transfer_command_pool;
+    allocate_info.commandBufferCount = 1;
+    allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+    VK_ERROR(vkAllocateCommandBuffers(device, &allocate_info,
+                                      &transfer_command_buffer));
   }
 
   {
@@ -337,6 +386,9 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     VK_ERROR(vkCreateSemaphore(device, &create_info, nullptr,
                                &aquire_image_semaphore));
+
+
+    VK_ERROR(vkCreateSemaphore(device, &create_info, nullptr, &transfer_finished_semaphore));
 
     rendering_finished_semaphores.resize(swapchain.images.size());
 
@@ -376,15 +428,19 @@ render::RenderContext::~RenderContext() {
 
   vkDeviceWaitIdle(device);
 
+  vmaDestroyAllocator(vma_allocator);
+
   vkDestroyFence(device, fence, nullptr);
 
   vkDestroySemaphore(device, aquire_image_semaphore, nullptr);
+  vkDestroySemaphore(device, transfer_finished_semaphore, nullptr);
 
   for (auto &semaphore : rendering_finished_semaphores) {
     vkDestroySemaphore(device, semaphore, nullptr);
   }
 
-  vkDestroyCommandPool(device, command_pool, nullptr);
+  vkDestroyCommandPool(device, transfer_command_pool, nullptr);
+  vkDestroyCommandPool(device, graphics_command_pool, nullptr);
 
   for (auto &v : swapchain.views) {
     vkDestroyImageView(device, v, nullptr);
@@ -449,13 +505,17 @@ void render::RenderContext::render() {
   }
 
   vkResetFences(device, 1, &fence);
-  vkResetCommandPool(device, command_pool, 0);
+  vkResetCommandPool(device, graphics_command_pool, 0);
+  vkResetCommandPool(device, transfer_command_pool, 0);
+
+
+  //Record Command Buffers
 
   VkCommandBufferBeginInfo begin_info = {};
   begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-  VK_ERROR(vkBeginCommandBuffer(primary_command_buffer, &begin_info));
+  VK_ERROR(vkBeginCommandBuffer(graphics_command_buffer, &begin_info));
 
   {
 
@@ -466,7 +526,7 @@ void render::RenderContext::render() {
           resource_handler::COLOR_ATTACHMENT_OPTIMAL;
 
       resource_handler->updateTransistion(
-          primary_command_buffer, transistion_data,
+          graphics_command_buffer, transistion_data,
           swapchain.resource_image_indices[swapchain_image_index]);
     }
 
@@ -486,9 +546,9 @@ void render::RenderContext::render() {
     rendering_info.colorAttachmentCount = 1;
     rendering_info.pColorAttachments = &attachment_info;
 
-    vkCmdBeginRenderingKHR(primary_command_buffer, &rendering_info);
+    vkCmdBeginRenderingKHR(graphics_command_buffer, &rendering_info);
 
-    vkCmdBindPipeline(primary_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipeline_manager->getPipelineByName("triangle").pipeline);
 
     VkViewport viewport = {};
@@ -503,12 +563,12 @@ void render::RenderContext::render() {
     scissor.extent = swapchain.extent;
     scissor.offset = {0, 0};
 
-    vkCmdSetViewport(primary_command_buffer, 0, 1, &viewport);
-    vkCmdSetScissor(primary_command_buffer, 0, 1, &scissor);
+    vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
+    vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    vkCmdDraw(primary_command_buffer, 3, 1, 0, 0);
+    vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
 
-    vkCmdEndRenderingKHR(primary_command_buffer);
+    vkCmdEndRenderingKHR(graphics_command_buffer);
   }
 
   {
@@ -518,11 +578,11 @@ void render::RenderContext::render() {
         resource_handler::PRESENT_SRC_KHR;
 
     resource_handler->updateTransistion(
-        primary_command_buffer, transistion_data,
+        graphics_command_buffer, transistion_data,
         swapchain.resource_image_indices[swapchain_image_index]);
   }
 
-  vkEndCommandBuffer(primary_command_buffer);
+  vkEndCommandBuffer(graphics_command_buffer);
 
   VkSemaphoreSubmitInfoKHR wait_submit_info = {};
   wait_submit_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR;
@@ -542,7 +602,7 @@ void render::RenderContext::render() {
 
   VkCommandBufferSubmitInfoKHR submit_info = {};
   submit_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO_KHR;
-  submit_info.commandBuffer = primary_command_buffer;
+  submit_info.commandBuffer = graphics_command_buffer;
   submit_info.deviceMask = 0;
 
   VkSubmitInfo2KHR submit = {};

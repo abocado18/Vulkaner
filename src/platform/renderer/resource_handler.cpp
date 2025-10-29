@@ -3,13 +3,14 @@
 #include "vulkan_macros.h"
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 resource_handler::ResourceHandler::ResourceHandler(
     VkPhysicalDevice &ph_device, VkDevice &device, VmaAllocator &allocator,
-    uint32_t graphics_queue_index)
+    uint32_t transfer_queue_index)
     : device(device), allocator(allocator),
-      graphics_queue_index(graphics_queue_index) {
+      transfer_queue_index(transfer_queue_index) {
 
   VkDescriptorSetLayoutBinding binding{};
   binding.binding = 0;
@@ -107,7 +108,7 @@ uint64_t resource_handler::ResourceHandler::insertResource(
   static uint64_t next_id = 0;
   uint64_t id = next_id++;
 
-  this->resources[id] = resource;
+  this->resources.insert_or_assign(id, resource);
 
   return id;
 }
@@ -144,8 +145,8 @@ void resource_handler::ResourceHandler::updateTransistion(
     memory_barrier.image = resource.resource_data.image.image;
     memory_barrier.subresourceRange = resource.resource_data.image.range;
 
-    memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    memory_barrier.srcQueueFamilyIndex = transistion_data.source_queue_family;
+    memory_barrier.dstQueueFamilyIndex = transistion_data.dst_queue_family;
 
     VkDependencyInfoKHR dependency_info = {};
     dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
@@ -164,23 +165,23 @@ void resource_handler::ResourceHandler::updateTransistion(
   }
 }
 
-uint64_t resource_handler::ResourceHandler::recordloadImageCommand(
-    VkCommandBuffer command_buffer, const std::string &image_path,
-    ImageLayouts desired_image_layout, VkImageUsageFlags image_usage,
-    VkFormat image_format) {
+uint64_t
+resource_handler::ResourceHandler::loadImage(const std::string &path,
+                                             VkFormat image_format,
+                                             VkImageUsageFlags image_usage) {
 
-  uint64_t resource_index = UINT64_MAX;
+  resource_handler::StagingTransferData transfer_data = {};
 
   int width, height, channels;
 
-  stbi_uc *pixels =
-      stbi_load(image_path.c_str(), &width, &height, &channels, 4);
+  stbi_uc *pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
 
   if (!pixels) {
     std::cerr << "No file found\n";
     return UINT64_MAX;
   }
 
+  uint64_t resource_index = UINT64_MAX;
   {
 
     Image new_image = {};
@@ -198,7 +199,7 @@ uint64_t resource_handler::ResourceHandler::recordloadImageCommand(
     image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     image_create_info.queueFamilyIndexCount = 1;
-    image_create_info.pQueueFamilyIndices = &graphics_queue_index;
+    image_create_info.pQueueFamilyIndices = &transfer_queue_index;
     image_create_info.extent = {static_cast<uint32_t>(width),
                                 static_cast<uint32_t>(height), 1};
 
@@ -223,52 +224,32 @@ uint64_t resource_handler::ResourceHandler::recordloadImageCommand(
     resource_index = insertResource(new_resource);
   }
 
-  std::memcpy(
-      reinterpret_cast<uint8_t *>(staging_buffer.allocation_info.pMappedData) +
-          staging_buffer.offset,
-      pixels, width * height * 4);
+  {
+    std::memcpy(reinterpret_cast<uint8_t *>(
+                    staging_buffer.allocation_info.pMappedData) +
+                    staging_buffer.offset,
+                pixels, width * height * 4);
 
-  TransistionData transistion_data = {};
-  transistion_data.type = ResourceType::IMAGE;
-  transistion_data.data.image_data.image_layout =
-      ImageLayouts::TRANSFER_DST_OPTIMAL;
+    transfer_data.source_offset = staging_buffer.offset;
+    transfer_data.size = width * height * 4;
+    transfer_data.target = &resources.at(resource_index);
+    transfer_data.target_offset = 0;
+  }
 
-  updateTransistion(command_buffer, transistion_data, resource_index);
+  {
+    staging_buffer.offset += width * height * 4;
+  }
 
-  auto &r = resources[resource_index];
-
-  VkBufferImageCopy2 region = {};
-  region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
-  region.imageSubresource.aspectMask = r.resource_data.image.range.aspectMask;
-  region.imageSubresource.baseArrayLayer =
-      r.resource_data.image.range.baseArrayLayer;
-  region.imageSubresource.layerCount = r.resource_data.image.range.layerCount;
-  region.imageSubresource.mipLevel = r.resource_data.image.range.baseMipLevel;
-  region.imageOffset = {0, 0, 0};
-  region.imageExtent = {static_cast<uint32_t>(width),
-                        static_cast<uint32_t>(height), 1};
-
-  region.bufferOffset = staging_buffer.offset;
-
-  VkCopyBufferToImageInfo2 copy_image_info = {};
-  copy_image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2;
-  copy_image_info.srcBuffer = staging_buffer.buffer;
-  copy_image_info.regionCount = 1;
-  copy_image_info.pRegions = &region;
-  copy_image_info.dstImageLayout =
-      getImageLayout(r.resource_data.image.current_layout);
-  copy_image_info.dstImage = r.resource_data.image.image;
-
-  vkCmdCopyBufferToImage2KHR(command_buffer, &copy_image_info);
-
-  TransistionData second_transistion_data = {};
-  second_transistion_data.type = ResourceType::IMAGE;
-  second_transistion_data.data.image_data.image_layout = desired_image_layout;
-
-  updateTransistion(command_buffer, second_transistion_data, resource_index);
-  stbi_image_free(pixels);
-
-  staging_buffer.offset += width * height * 4;
+  this->transfers.push_back(transfer_data);
 
   return resource_index;
+}
+
+void resource_handler::ResourceHandler::clearStagingTransferData() {
+  transfers.clear();
+}
+
+std::vector<resource_handler::StagingTransferData> &
+resource_handler::ResourceHandler::getStagingTransferData() {
+  return transfers;
 }

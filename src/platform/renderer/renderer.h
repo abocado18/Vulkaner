@@ -61,10 +61,17 @@ private:
   VkQueue graphics_queue;
   uint32_t graphics_queue_index;
 
-  VkCommandBuffer primary_command_buffer;
-  VkCommandPool command_pool;
+  VkQueue transfer_queue;
+  uint32_t transfer_queue_index;
+
+  VkCommandBuffer graphics_command_buffer;
+  VkCommandPool graphics_command_pool;
+
+  VkCommandBuffer transfer_command_buffer;
+  VkCommandPool transfer_command_pool;
 
   VkSemaphore aquire_image_semaphore;
+  VkSemaphore transfer_finished_semaphore;
   std::vector<VkSemaphore> rendering_finished_semaphores;
 
   VkFence fence;

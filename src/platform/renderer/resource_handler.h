@@ -175,6 +175,11 @@ struct TransistionData {
     TransistionBufferData buffer_data;
     TransistionImageData image_data;
   } data;
+
+
+  uint32_t source_queue_family = VK_QUEUE_FAMILY_IGNORED;
+  uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED;
+
 };
 
 struct Image {
@@ -187,6 +192,9 @@ struct Image {
 };
 
 struct Buffer {
+
+  Buffer() = default;
+
   VkBuffer buffer;
   BufferAccessMasks current_access_mask;
   VmaAllocationInfo allocation_info;
@@ -212,10 +220,20 @@ struct Resource {
   uint32_t binding_slot;
 };
 
+struct StagingTransferData {
+
+
+  Resource *target;
+
+  uint32_t source_offset;
+  uint32_t target_offset;
+  uint32_t size;
+};
+
 class ResourceHandler {
 public:
   ResourceHandler(VkPhysicalDevice &ph_device, VkDevice &device,
-                  VmaAllocator &allocator, uint32_t graphics_queue_index);
+                  VmaAllocator &allocator, uint32_t transfer_queue_index);
   ~ResourceHandler();
 
   // Use this for barriers for resources
@@ -225,15 +243,16 @@ public:
 
   uint64_t insertResource(Resource &resource);
 
+  uint64_t loadImage(const std::string &path, VkFormat image_format, VkImageUsageFlags image_usage);
 
-  uint64_t loadImage;
+  uint64_t bindImage();
+
+  std::vector<StagingTransferData> &getStagingTransferData();
+
+  void clearStagingTransferData();
 
 private:
-  uint64_t recordloadImageCommand(VkCommandBuffer command_buffer,
-                                  const std::string &image_path,
-                                  ImageLayouts desired_image_layout,
-                                  VkImageUsageFlags image_usage,
-                                  VkFormat image_format);
+  
 
   std::unordered_map<uint64_t, Resource> resources = {};
 
@@ -246,9 +265,9 @@ private:
 
   uint32_t sampled_images_limit;
 
-  uint32_t graphics_queue_index;
+  uint32_t transfer_queue_index;
 
-  
+  std::vector<StagingTransferData> transfers;
 };
 
 } // namespace resource_handler
