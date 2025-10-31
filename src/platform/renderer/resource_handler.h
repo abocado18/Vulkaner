@@ -272,6 +272,7 @@ private:
   Buffer staging_buffer;
 
   Descriptor sampled_images_descriptor;
+  Descriptor storage_pointer_descriptor;
 
   uint32_t sampled_images_limit;
 

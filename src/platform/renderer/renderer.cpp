@@ -167,7 +167,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
           VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
           VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-          VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
+          VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME,
+          VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
 
       };
 
@@ -262,7 +263,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
         VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-        VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
+        VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
 
     };
 
@@ -287,14 +289,19 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
     sync_features.synchronization2 = VK_TRUE;
 
+    VkPhysicalDeviceBufferDeviceAddressFeaturesKHR address_features = {};
+    address_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
+    address_features.bufferDeviceAddress = VK_TRUE;
+    
+
     // Chain together
     dynamic_features.pNext = &sync_features;
     sync_features.pNext = &indexing_features;
-    indexing_features.pNext = nullptr;
+    indexing_features.pNext = &address_features;
+    address_features.pNext = nullptr;
 
     VkPhysicalDeviceFeatures ph_features = {};
     ph_features.robustBufferAccess = VK_TRUE;
-    
 
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -417,7 +424,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
   }
 
   {
-    pipeline_manager = new pipeline::PipelineManager(device, shader_path, *resource_handler);
+    pipeline_manager =
+        new pipeline::PipelineManager(device, shader_path, *resource_handler);
   }
 
   {

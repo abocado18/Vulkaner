@@ -15,70 +15,113 @@ resource_handler::ResourceHandler::ResourceHandler(
   VkPhysicalDeviceProperties properties;
   vkGetPhysicalDeviceProperties(ph_device, &properties);
 
-  sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
+  {
 
-  VkDescriptorSetLayoutBinding binding{};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  binding.descriptorCount = sampled_images_limit;
-  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-  binding.pImmutableSamplers = nullptr;
+    VkDescriptorSetLayoutBinding layout_binding = {};
+    layout_binding.descriptorCount = 1;
+    layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    layout_binding.stageFlags = VK_SHADER_STAGE_ALL;
+    layout_binding.binding = 0;
 
-  VkDescriptorSetLayoutCreateInfo set_layout_create_info{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create_info.flags =
-      VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT;
-  const VkDescriptorBindingFlagsEXT flags =
-      VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT |
-      VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT |
-      VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT |
-      VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT_EXT;
+    VkDescriptorSetLayoutCreateInfo layout_create_info = {};
+    layout_create_info.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create_info.bindingCount = 1;
+    layout_create_info.pBindings = &layout_binding;
 
-  VkDescriptorSetLayoutBindingFlagsCreateInfoEXT binding_flags{};
-  binding_flags.sType =
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-  binding_flags.bindingCount = 1;
-  binding_flags.pBindingFlags = &flags;
-  set_layout_create_info.pNext = &binding_flags;
+    VK_ERROR(vkCreateDescriptorSetLayout(device, &layout_create_info, nullptr,
+                                         &storage_pointer_descriptor.layout));
 
-  set_layout_create_info.bindingCount = 1;
-  set_layout_create_info.pBindings = &binding;
+    VkDescriptorPoolSize pool_size = {};
+    pool_size.descriptorCount = 1;
+    pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
-  VK_ERROR(vkCreateDescriptorSetLayout(device, &set_layout_create_info, nullptr,
-                                       &sampled_images_descriptor.layout));
+    VkDescriptorPoolCreateInfo pool_create_info = {};
+    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_create_info.poolSizeCount = 1;
+    pool_create_info.pPoolSizes = &pool_size;
+    pool_create_info.maxSets = 1;
 
-  VkDescriptorPoolSize pool_size = {};
-  pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  pool_size.descriptorCount = sampled_images_limit;
+    VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
+                                    &storage_pointer_descriptor.pool));
 
-  VkDescriptorPoolCreateInfo pool_create_info = {};
-  pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pool_create_info.maxSets = 1;
-  pool_create_info.poolSizeCount = 1;
-  pool_create_info.pPoolSizes = &pool_size;
-  pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    VkDescriptorSetAllocateInfo allocate_info = {};
+    allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocate_info.descriptorSetCount = 1;
+    allocate_info.descriptorPool = storage_pointer_descriptor.pool;
+    allocate_info.pSetLayouts = &storage_pointer_descriptor.layout;
 
-  VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
-                                  &sampled_images_descriptor.pool));
+    vkAllocateDescriptorSets(device, &allocate_info,
+                             &storage_pointer_descriptor.descriptor);
+  }
 
-  uint32_t variableDescriptorCount = sampled_images_limit;
+  {
+    sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
 
-  VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variable_count_info{};
-  variable_count_info.sType =
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-  variable_count_info.descriptorSetCount = 1;
-  variable_count_info.pDescriptorCounts = &variableDescriptorCount;
-  variable_count_info.pNext = nullptr;
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = sampled_images_limit;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    binding.pImmutableSamplers = nullptr;
 
-  VkDescriptorSetAllocateInfo allocate_info = {};
-  allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  allocate_info.descriptorPool = sampled_images_descriptor.pool;
-  allocate_info.descriptorSetCount = 1;
-  allocate_info.pSetLayouts = &sampled_images_descriptor.layout;
-  allocate_info.pNext = &variable_count_info;
+    VkDescriptorSetLayoutCreateInfo set_layout_create_info{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    set_layout_create_info.flags =
+        VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT;
+    const VkDescriptorBindingFlagsEXT flags =
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT |
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT |
+        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT |
+        VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT_EXT;
 
-  VK_ERROR(vkAllocateDescriptorSets(device, &allocate_info,
-                                    &sampled_images_descriptor.descriptor));
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT binding_flags{};
+    binding_flags.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    binding_flags.bindingCount = 1;
+    binding_flags.pBindingFlags = &flags;
+    set_layout_create_info.pNext = &binding_flags;
+
+    set_layout_create_info.bindingCount = 1;
+    set_layout_create_info.pBindings = &binding;
+
+    VK_ERROR(vkCreateDescriptorSetLayout(device, &set_layout_create_info,
+                                         nullptr,
+                                         &sampled_images_descriptor.layout));
+
+    VkDescriptorPoolSize pool_size = {};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = sampled_images_limit;
+
+    VkDescriptorPoolCreateInfo pool_create_info = {};
+    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_create_info.maxSets = 1;
+    pool_create_info.poolSizeCount = 1;
+    pool_create_info.pPoolSizes = &pool_size;
+    pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+
+    VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
+                                    &sampled_images_descriptor.pool));
+
+    uint32_t variableDescriptorCount = sampled_images_limit;
+
+    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variable_count_info{};
+    variable_count_info.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+    variable_count_info.descriptorSetCount = 1;
+    variable_count_info.pDescriptorCounts = &variableDescriptorCount;
+    variable_count_info.pNext = nullptr;
+
+    VkDescriptorSetAllocateInfo allocate_info = {};
+    allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocate_info.descriptorPool = sampled_images_descriptor.pool;
+    allocate_info.descriptorSetCount = 1;
+    allocate_info.pSetLayouts = &sampled_images_descriptor.layout;
+    allocate_info.pNext = &variable_count_info;
+
+    VK_ERROR(vkAllocateDescriptorSets(device, &allocate_info,
+                                      &sampled_images_descriptor.descriptor));
+  }
 
   {
     // Create Staging Buffer
@@ -108,7 +151,12 @@ resource_handler::ResourceHandler::~ResourceHandler() {
   vkDestroyDescriptorSetLayout(device, sampled_images_descriptor.layout,
                                nullptr);
 
+  vkDestroyDescriptorSetLayout(device, storage_pointer_descriptor.layout,
+                               nullptr);
+
   vkDestroyDescriptorPool(device, sampled_images_descriptor.pool, nullptr);
+
+  vkDestroyDescriptorPool(device, storage_pointer_descriptor.pool, nullptr);
 
   vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
