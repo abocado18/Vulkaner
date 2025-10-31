@@ -56,6 +56,28 @@ resource_handler::ResourceHandler::ResourceHandler(
   }
 
   {
+
+    storage_pointer_buffer_max = 100'000;
+
+    VkBufferCreateInfo buffer_create_info = {};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.size = storage_pointer_buffer_max * sizeof(uint64_t);
+    buffer_create_info.sharingMode =
+        VK_SHARING_MODE_CONCURRENT; // Make exclusive later
+    buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+    VmaAllocationCreateInfo buffer_allocation_info = {};
+    buffer_allocation_info.usage = VMA_MEMORY_USAGE_AUTO;
+    buffer_allocation_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+    buffer_allocation_info.priority = 1.0f;
+
+    vmaCreateBuffer(allocator, &buffer_create_info, &buffer_allocation_info,
+                    &storage_pointer_buffer.buffer,
+                    &storage_pointer_buffer.allocation,
+                    &storage_pointer_buffer.allocation_info);
+  }
+
+  {
     sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
 
     VkDescriptorSetLayoutBinding binding{};
@@ -159,6 +181,8 @@ resource_handler::ResourceHandler::~ResourceHandler() {
   vkDestroyDescriptorPool(device, storage_pointer_descriptor.pool, nullptr);
 
   vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
+
+  vmaDestroyBuffer(allocator, storage_pointer_buffer.buffer, storage_pointer_buffer.allocation);
 }
 
 uint64_t resource_handler::ResourceHandler::insertResource(

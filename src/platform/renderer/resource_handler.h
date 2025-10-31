@@ -271,6 +271,10 @@ private:
 
   Buffer staging_buffer;
 
+  Buffer storage_pointer_buffer;
+
+  uint32_t storage_pointer_buffer_max;
+
   Descriptor sampled_images_descriptor;
   Descriptor storage_pointer_descriptor;
 
@@ -288,6 +292,16 @@ private:
       return UINT64_MAX;
     }
 
+    return new_slot++;
+  }
+
+  uint32_t getNewStoragePointerIndexSlot() {
+    static uint32_t new_slot = 0;
+
+    if (new_slot > storage_pointer_buffer_max) {
+      std::cerr << "Max valufe for storage pointer index reached\n";
+      return UINT32_MAX;
+    }
     return new_slot++;
   }
 };
