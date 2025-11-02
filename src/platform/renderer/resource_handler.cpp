@@ -12,73 +12,16 @@ resource_handler::ResourceHandler::ResourceHandler(
     : device(device), allocator(allocator),
       transfer_queue_index(transfer_queue_index) {
 
-  VkPhysicalDeviceProperties properties;
-  vkGetPhysicalDeviceProperties(ph_device, &properties);
-
-  {
-
-    VkDescriptorSetLayoutBinding layout_binding = {};
-    layout_binding.descriptorCount = 1;
-    layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    layout_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    layout_binding.binding = 0;
-
-    VkDescriptorSetLayoutCreateInfo layout_create_info = {};
-    layout_create_info.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_create_info.bindingCount = 1;
-    layout_create_info.pBindings = &layout_binding;
-
-    VK_ERROR(vkCreateDescriptorSetLayout(device, &layout_create_info, nullptr,
-                                         &storage_pointer_descriptor.layout));
-
-    VkDescriptorPoolSize pool_size = {};
-    pool_size.descriptorCount = 1;
-    pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-
-    VkDescriptorPoolCreateInfo pool_create_info = {};
-    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_create_info.poolSizeCount = 1;
-    pool_create_info.pPoolSizes = &pool_size;
-    pool_create_info.maxSets = 1;
-
-    VK_ERROR(vkCreateDescriptorPool(device, &pool_create_info, nullptr,
-                                    &storage_pointer_descriptor.pool));
-
-    VkDescriptorSetAllocateInfo allocate_info = {};
-    allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocate_info.descriptorSetCount = 1;
-    allocate_info.descriptorPool = storage_pointer_descriptor.pool;
-    allocate_info.pSetLayouts = &storage_pointer_descriptor.layout;
-
-    vkAllocateDescriptorSets(device, &allocate_info,
-                             &storage_pointer_descriptor.descriptor);
-  }
+  vkGetPhysicalDeviceProperties(ph_device, &device_properties);
 
   {
 
     storage_pointer_buffer_max = 100'000;
-
-    VkBufferCreateInfo buffer_create_info = {};
-    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_create_info.size = storage_pointer_buffer_max * sizeof(uint64_t);
-    buffer_create_info.sharingMode =
-        VK_SHARING_MODE_CONCURRENT; // Make exclusive later
-    buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-    VmaAllocationCreateInfo buffer_allocation_info = {};
-    buffer_allocation_info.usage = VMA_MEMORY_USAGE_AUTO;
-    buffer_allocation_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-    buffer_allocation_info.priority = 1.0f;
-
-    vmaCreateBuffer(allocator, &buffer_create_info, &buffer_allocation_info,
-                    &storage_pointer_buffer.buffer,
-                    &storage_pointer_buffer.allocation,
-                    &storage_pointer_buffer.allocation_info);
   }
 
   {
-    sampled_images_limit = properties.limits.maxDescriptorSetSampledImages;
+    sampled_images_limit =
+        device_properties.limits.maxDescriptorSetSampledImages;
 
     VkDescriptorSetLayoutBinding binding{};
     binding.binding = 0;
@@ -163,6 +106,7 @@ resource_handler::ResourceHandler::ResourceHandler(
                              &staging_buffer.allocation_info));
 
     staging_buffer.offset = 0;
+    staging_buffer.size = buffer_create_info.size;
   }
 }
 
@@ -173,16 +117,9 @@ resource_handler::ResourceHandler::~ResourceHandler() {
   vkDestroyDescriptorSetLayout(device, sampled_images_descriptor.layout,
                                nullptr);
 
-  vkDestroyDescriptorSetLayout(device, storage_pointer_descriptor.layout,
-                               nullptr);
-
   vkDestroyDescriptorPool(device, sampled_images_descriptor.pool, nullptr);
 
-  vkDestroyDescriptorPool(device, storage_pointer_descriptor.pool, nullptr);
-
   vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
-
-  vmaDestroyBuffer(allocator, storage_pointer_buffer.buffer, storage_pointer_buffer.allocation);
 }
 
 uint64_t resource_handler::ResourceHandler::insertResource(
@@ -244,6 +181,31 @@ void resource_handler::ResourceHandler::updateTransistion(
   } else {
 
     // To do: Add Transisition Logic for Buffers
+    VkBufferMemoryBarrier2KHR memory_barrier = {};
+    memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+    memory_barrier.buffer = resource.resource_data.buffer.buffer;
+    memory_barrier.dstAccessMask =
+        getAccessMask(transistion_data.data.buffer_data.buffer_usage);
+    memory_barrier.srcAccessMask =
+        getAccessMask(resource.resource_data.buffer.current_buffer_usage);
+    memory_barrier.srcStageMask =
+        getStageMask(resource.resource_data.buffer.current_buffer_usage);
+    memory_barrier.dstStageMask =
+        getStageMask(transistion_data.data.buffer_data.buffer_usage);
+    memory_barrier.dstQueueFamilyIndex = transistion_data.dst_queue_family;
+    memory_barrier.srcQueueFamilyIndex = transistion_data.source_queue_family;
+    memory_barrier.offset = 0;
+    memory_barrier.size = resource.resource_data.buffer.size;
+
+    VkDependencyInfoKHR dependency_info = {};
+    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+    dependency_info.bufferMemoryBarrierCount = 1;
+    dependency_info.pBufferMemoryBarriers = &memory_barrier;
+
+    vkCmdPipelineBarrier2KHR(command_buffer, &dependency_info);
+
+    resource.resource_data.buffer.current_buffer_usage =
+        transistion_data.data.buffer_data.buffer_usage;
   }
 }
 
@@ -347,7 +309,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
 
     transfer_data.source_offset = staging_buffer.offset;
     transfer_data.size = width * height * 4;
-    transfer_data.target = &resources.at(resource_index);
+ 
     transfer_data.target_offset = 0;
     transfer_data.resource_idx = resource_index;
   }

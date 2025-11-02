@@ -1,10 +1,12 @@
 #include "renderer.h"
 
 #include "allocator/vk_mem_alloc.h"
+#include "gpu_structs.h"
 #include "pipeline.h"
 #include "resource_handler.h"
 
 #include "vulkan_macros.h"
+#include <cassert>
 #include <iostream>
 #include <map>
 #include <string>
@@ -290,14 +292,15 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     sync_features.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceBufferDeviceAddressFeaturesKHR address_features = {};
-    address_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
+    address_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
     address_features.bufferDeviceAddress = VK_TRUE;
-    
 
     // Chain together
-    dynamic_features.pNext = &sync_features;
-    sync_features.pNext = &indexing_features;
-    indexing_features.pNext = &address_features;
+
+    dynamic_features.pNext = &address_features;
+    sync_features.pNext = &dynamic_features;
+    indexing_features.pNext = &sync_features;
     address_features.pNext = nullptr;
 
     VkPhysicalDeviceFeatures ph_features = {};
@@ -310,7 +313,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.enabledLayerCount = 0;
     create_info.queueCreateInfoCount = queue_create_infos.size();
     create_info.pQueueCreateInfos = queue_create_infos.data();
-    create_info.pNext = &dynamic_features;
+    create_info.pNext = &indexing_features;
     create_info.pEnabledFeatures = &ph_features;
 
     VK_ERROR(vkCreateDevice(this->physical_device, &create_info, nullptr,
@@ -345,6 +348,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     create_info.physicalDevice = this->physical_device;
     create_info.preferredLargeHeapBlockSize = 0;
     create_info.vulkanApiVersion = VK_API_VERSION_1_2;
+    create_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     vmaImportVulkanFunctionsFromVolk(&create_info, &vma_vulkan_func);
 
@@ -440,6 +444,18 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     resource_handler->loadImage(SHADER_PATH "/zelda.jpg",
                                 VK_FORMAT_R8G8B8A8_UNORM,
                                 VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    uint32_t key = resource_handler->createBuffer<Vector3>(
+        500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER);
+
+    Vector3 a(0.0f, 1.0f, 1.0f);
+
+    resource_handler->writeToBuffer<Vector3>(&a);
+
+
+    Vector3 b(1.0f, 0.0f, 0.0f);
+
+    resource_handler->writeToBuffer<Vector3>(&b);
   }
 }
 
@@ -544,26 +560,32 @@ void render::RenderContext::render() {
     VK_ERROR(vkBeginCommandBuffer(transfer_command_buffer, &begin_info));
 
     for (auto &t : transfer_data) {
-      if (t.target->type == resource_handler::ResourceType::IMAGE) {
+
+      const auto &target = resource_handler->getResource(t.resource_idx);
+
+      if (target.type == resource_handler::ResourceType::IMAGE) {
+
+
+        
 
         VkBufferImageCopy2KHR region = {};
         region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2_KHR;
         region.imageSubresource.aspectMask =
-            t.target->resource_data.image.range.aspectMask;
+            target.resource_data.image.range.aspectMask;
         region.imageSubresource.baseArrayLayer =
-            t.target->resource_data.image.range.baseArrayLayer;
+            target.resource_data.image.range.baseArrayLayer;
         region.imageSubresource.layerCount =
-            t.target->resource_data.image.range.layerCount;
+            target.resource_data.image.range.layerCount;
         region.imageSubresource.mipLevel =
-            t.target->resource_data.image.range.baseMipLevel;
+            target.resource_data.image.range.baseMipLevel;
         region.imageOffset = {0, 0, 0};
-        region.imageExtent = t.target->resource_data.image.extent;
+        region.imageExtent = target.resource_data.image.extent;
 
         region.bufferOffset = t.source_offset;
 
         VkCopyBufferToImageInfo2KHR image_info = {};
         image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR;
-        image_info.dstImage = t.target->resource_data.image.image;
+        image_info.dstImage = target.resource_data.image.image;
         image_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
         image_info.regionCount = 1;
@@ -605,7 +627,48 @@ void render::RenderContext::render() {
 
       } else {
 
-        // To do: Implmemet buffer transfer
+        auto &staging_buffer = resource_handler->getStagingBuffer();
+
+        
+
+        VkBufferCopy2KHR region = {};
+        region.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2_KHR;
+        region.srcOffset = t.source_offset;
+        region.dstOffset = t.target_offset;
+        region.size = t.size;
+
+        VkCopyBufferInfo2KHR copy_buffer_info = {};
+        copy_buffer_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2_KHR;
+        copy_buffer_info.srcBuffer = staging_buffer;
+        copy_buffer_info.dstBuffer = target.resource_data.buffer.buffer;
+        copy_buffer_info.regionCount = 1;
+        copy_buffer_info.pRegions = &region;
+
+        {
+          resource_handler::TransistionData transistion_data = {};
+          transistion_data.source_queue_family = graphics_queue_index;
+          transistion_data.dst_queue_family = transfer_queue_index;
+          transistion_data.data.buffer_data.buffer_usage =
+              resource_handler::BUFFER_USAGE_TRANSFER_DST;
+          transistion_data.type = resource_handler::ResourceType::BUFFER;
+
+          resource_handler->updateTransistion(transfer_command_buffer,
+                                              transistion_data, t.resource_idx);
+        }
+
+        vkCmdCopyBuffer2KHR(transfer_command_buffer, &copy_buffer_info);
+
+        {
+          resource_handler::TransistionData transistion_data = {};
+          transistion_data.source_queue_family = transfer_queue_index;
+          transistion_data.dst_queue_family = graphics_queue_index;
+          transistion_data.data.buffer_data.buffer_usage =
+              resource_handler::BUFFER_USAGE_STORAGE_BUFFER;
+          transistion_data.type = resource_handler::ResourceType::BUFFER;
+
+          resource_handler->updateTransistion(transfer_command_buffer,
+                                              transistion_data, t.resource_idx);
+        }
       }
     }
 
@@ -696,6 +759,12 @@ void render::RenderContext::render() {
 
     vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
+
+    auto &b = resource_handler->getBufferPerType<Vector3>();
+
+    vkCmdPushConstants(graphics_command_buffer,
+                       pipeline_manager->getPipelineByName("triangle").layout,
+                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b.address), &b.address);
 
     vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
 

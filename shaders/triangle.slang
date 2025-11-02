@@ -4,6 +4,20 @@ struct VSOut
     float2 uv;
 };
 
+
+struct Col
+{
+    float3 value;
+    int _pad;
+}
+
+[[vk_push_constant]]
+Col *buffer_address;
+
+
+
+
+
 [vk_binding(0, 0)]
 Sampler2D<float4> sampled_textures[];
 
@@ -29,10 +43,18 @@ VSOut vertexMain(uint id : SV_VertexID)
     return output;
 }
 
+
+
+
 [shader("fragment")]
 float4 pixelMain(VSOut input) : SV_Target
 {
+
+    
+    Col bb = buffer_address[1];
+    
+
     Sampler2D tex = sampled_textures[0];
     float3 rgb = tex.Sample(input.uv).rgb;
-    return float4(rgb * float3(1.0, 0.0, 0.0), 1); // red triangle
+    return float4(bb.value, 1); // red triangle
 }
