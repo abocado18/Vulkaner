@@ -5,6 +5,7 @@
 #include "pipeline.h"
 #include "resource_handler.h"
 
+#include "vertex.h"
 #include "vulkan_macros.h"
 #include <cassert>
 #include <iostream>
@@ -433,6 +434,14 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
   }
 
   {
+    // Create necessary buffers for rendering
+    resource_handler->createBuffer<vertex::Vertex>(
+        5'000'000, resource_handler::BUFFER_USAGE_VERTEX_BUFFER);
+    resource_handler->createBuffer<vertex::Index>(
+        5'000'000, resource_handler::BUFFER_USAGE_INDEX_BUFFER);
+  }
+
+  {
     pipeline::PipelineData pipeline_data = {};
     pipeline::PipelineData::getDefault(pipeline_data);
     pipeline_data.rasterization_create_info.cullMode = VK_CULL_MODE_NONE;
@@ -451,7 +460,6 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     Vector3 a(0.0f, 1.0f, 1.0f);
 
     resource_handler->writeToBuffer<Vector3>(&a);
-
 
     Vector3 b(1.0f, 0.0f, 0.0f);
 
@@ -565,9 +573,6 @@ void render::RenderContext::render() {
 
       if (target.type == resource_handler::ResourceType::IMAGE) {
 
-
-        
-
         VkBufferImageCopy2KHR region = {};
         region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2_KHR;
         region.imageSubresource.aspectMask =
@@ -628,8 +633,6 @@ void render::RenderContext::render() {
       } else {
 
         auto &staging_buffer = resource_handler->getStagingBuffer();
-
-        
 
         VkBufferCopy2KHR region = {};
         region.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2_KHR;
@@ -764,7 +767,8 @@ void render::RenderContext::render() {
 
     vkCmdPushConstants(graphics_command_buffer,
                        pipeline_manager->getPipelineByName("triangle").layout,
-                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b.address), &b.address);
+                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b.address),
+                       &b.address);
 
     vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
 

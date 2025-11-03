@@ -19,4 +19,11 @@ struct Keys {
 
 static_assert(sizeof(Keys) < 128);
 
+struct Mesh
+{
+  Keys keys;
+  uint32_t number_of_indices;
+  uint64_t pipeline_key;
+};
+
 } // namespace mesh

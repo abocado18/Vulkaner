@@ -27,14 +27,13 @@ struct alignas(16) Vertex {
 
 static_assert(sizeof(Vertex) % 16 == 0);
 
-struct alignas(16) Instance {
-  Vector4 transform_matrix0;
-  Vector4 transform_matrix1;
-  Vector4 transform_matrix2;
-  Vector4 transform_matrix3;
+struct Index
+{
+  uint32_t value;
 };
 
-static_assert(sizeof(Instance) % 16 == 0);
+static_assert(sizeof(Index) == sizeof(uint32_t));
+
 
 struct VertexDesc {
 
@@ -46,16 +45,12 @@ struct VertexDesc {
 inline VertexDesc getVertexDesc() {
   VertexDesc vertex_desc = {};
 
-  vertex_desc.attribute_descs.resize(11);
-  vertex_desc.binding_descs.resize(2);
+  vertex_desc.attribute_descs.resize(7);
+  vertex_desc.binding_descs.resize(1);
 
   vertex_desc.binding_descs[0].binding = 0;
   vertex_desc.binding_descs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
   vertex_desc.binding_descs[0].stride = sizeof(Vertex);
-
-  vertex_desc.binding_descs[1].binding = 1;
-  vertex_desc.binding_descs[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-  vertex_desc.binding_descs[1].stride = sizeof(Instance);
 
   vertex_desc.attribute_descs[0].binding = 0;
   vertex_desc.attribute_descs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -92,25 +87,6 @@ inline VertexDesc getVertexDesc() {
   vertex_desc.attribute_descs[6].offset = 96;
   vertex_desc.attribute_descs[6].location = 6;
 
-  vertex_desc.attribute_descs[7].binding = 1;
-  vertex_desc.attribute_descs[7].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  vertex_desc.attribute_descs[7].offset = 0;
-  vertex_desc.attribute_descs[7].location = 7;
-
-  vertex_desc.attribute_descs[8].binding = 1;
-  vertex_desc.attribute_descs[8].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  vertex_desc.attribute_descs[8].offset = 16;
-  vertex_desc.attribute_descs[8].location = 8;
-
-  vertex_desc.attribute_descs[9].binding = 1;
-  vertex_desc.attribute_descs[9].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  vertex_desc.attribute_descs[9].offset = 32;
-  vertex_desc.attribute_descs[9].location = 9;
-
-  vertex_desc.attribute_descs[10].binding = 1;
-  vertex_desc.attribute_descs[10].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  vertex_desc.attribute_descs[10].offset = 48;
-  vertex_desc.attribute_descs[10].location = 10;
 
   return vertex_desc;
 }

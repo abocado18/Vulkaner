@@ -40,6 +40,9 @@ add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${MY_CODE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
+
+target_include_directories(${PROJECT_NAME} PRIVATE "src/")
+
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk slang)
 
 

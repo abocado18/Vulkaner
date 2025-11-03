@@ -51,7 +51,7 @@ float4 pixelMain(VSOut input) : SV_Target
 {
 
     
-    Col bb = buffer_address[1];
+    Col bb = buffer_address[2];
     
 
     Sampler2D tex = sampled_textures[0];
