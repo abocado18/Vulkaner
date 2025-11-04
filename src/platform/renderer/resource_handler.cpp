@@ -1,5 +1,4 @@
 #include "resource_handler.h"
-#include "stb_image/stb_image.h"
 #include "vulkan_macros.h"
 #include <cstdint>
 #include <cstring>

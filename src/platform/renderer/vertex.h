@@ -8,6 +8,10 @@
 namespace vertex {
 
 struct alignas(16) Vertex {
+
+  Vertex() = default;
+
+
   Vector3 position;
 
   Vector3 normal;

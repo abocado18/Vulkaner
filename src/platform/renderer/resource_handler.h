@@ -15,7 +15,7 @@
 
 #include "allocator/vk_mem_alloc.h"
 
-#include "stb_image/stb_image.h"
+#include "platform/loader/tinygltf/stb_image.h"
 #include "vulkan_macros.h"
 
 namespace resource_handler {
