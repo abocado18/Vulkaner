@@ -4,6 +4,8 @@
 
 #include "platform/renderer/renderer.h"
 
+#include "platform/math/math.h"
+
 namespace game {
 
 class Game {

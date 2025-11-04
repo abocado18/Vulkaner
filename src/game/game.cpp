@@ -8,6 +8,7 @@ game::Game::Game(render::IRenderContext &render_ctx)
 game::Game::~Game() {}
 
 
+
 void game::Game::runStartup()
 {
     world.runSchedule(Startup);

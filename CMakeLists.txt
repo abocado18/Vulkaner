@@ -52,6 +52,10 @@ set(SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE SHADER_PATH="${SHADER_PATH}")
 
+set(ASSET_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE ASSET_PATH="${ASSET_PATH}")
+
 
 
 if (MSVC)
