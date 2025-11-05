@@ -353,6 +353,16 @@ public:
   uint64_t createBuffer(uint32_t size, BufferUsages buffer_usage) {
     Buffer buffer;
 
+    {
+      if (buffers_per_type.find(std::type_index(typeid(T))) !=
+          buffers_per_type.end()) {
+        std::cerr << "Buffer of Type " << typeid(T).name()
+                  << " already exists\n";
+
+        return UINT64_MAX;
+      }
+    }
+
     VkBufferCreateInfo buffer_create_info = {};
     buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_create_info.queueFamilyIndexCount = 1;
@@ -398,7 +408,8 @@ public:
 
   // writes to position in buffer and returns correct element index
   template <typename T>
-  uint32_t writeToBuffer(T *data, uint32_t index = UINT32_MAX) {
+  uint32_t writeToBuffer(T *data, uint32_t number_of_instances = 1,
+                         uint32_t index = UINT32_MAX) {
 
     auto it = buffers_per_type.find(std::type_index(typeid(T)));
 
@@ -408,17 +419,19 @@ public:
       return UINT32_MAX;
     }
 
+    uint64_t total_size = sizeof(T) * number_of_instances;
+
     uint64_t buffer_resource_index = it->second;
 
     Resource &buffer_resource = resources.at(buffer_resource_index);
 
-    if (staging_buffer.offset + sizeof(T) > staging_buffer.size) {
+    if (staging_buffer.offset + total_size > staging_buffer.size) {
       std::cout << "Max size of staging buffer reached\n";
       return UINT32_MAX;
     }
 
     if (index == UINT32_MAX &&
-        buffer_resource.resource_data.buffer.offset + sizeof(T) >
+        buffer_resource.resource_data.buffer.offset + total_size >
             buffer_resource.resource_data.buffer.size) {
       std::cout << "Full size of buffer reached\n";
       return UINT32_MAX;
@@ -427,11 +440,11 @@ public:
     std::memcpy(reinterpret_cast<uint8_t *>(
                     staging_buffer.allocation_info.pMappedData) +
                     staging_buffer.offset,
-                data, sizeof(T));
+                data, total_size);
 
     StagingTransferData transfer_data = {};
     transfer_data.source_offset = staging_buffer.offset;
-    transfer_data.size = sizeof(T);
+    transfer_data.size = total_size;
     transfer_data.resource_idx = buffer_resource_index;
 
     transfer_data.target_offset =
@@ -439,10 +452,10 @@ public:
                             : index * sizeof(T);
 
     {
-      staging_buffer.offset += sizeof(T);
+      staging_buffer.offset += total_size;
 
       if (index == UINT32_MAX)
-        buffer_resource.resource_data.buffer.offset += sizeof(T);
+        buffer_resource.resource_data.buffer.offset += total_size;
     }
 
     transfers.push_back(transfer_data);

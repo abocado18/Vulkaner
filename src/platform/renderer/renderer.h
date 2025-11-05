@@ -24,26 +24,31 @@ struct Swapchain {
   VkExtent2D extent;
 };
 
-/// Virtual class that contains all functions used for rendering
-class IRenderContext {
-public:
-  IRenderContext() = default;
-  ~IRenderContext() = default;
-
-  virtual bool windowShouldClose() const = 0;
-
-  virtual void update() = 0;
-};
-
-class RenderContext : public IRenderContext {
+class RenderContext {
 public:
   RenderContext(uint32_t width, uint32_t height,
                 const std::string &shader_path);
   ~RenderContext();
 
-  bool windowShouldClose() const override;
+  // Public Api Calls
 
-  void update() override;
+  // Creates Buffer and returns Resource Index
+  template <typename T>
+  uint64_t createBuffer(uint32_t size,
+                        resource_handler::BufferUsages buffer_usage) {
+
+    return resource_handler->createBuffer<T>(size, buffer_usage);
+  }
+
+  // Writes to buffer and returns giveon or new offset
+  template <typename T>
+  uint32_t writeToBuffer(T *data, uint32_t number_of_instances = 1, uint32_t offset = UINT32_MAX) {
+    return resource_handler->writeToBuffer(data, number_of_instances, offset);
+  }
+
+  bool windowShouldClose() const;
+
+  void update();
 
 private:
   VkInstance instance;
@@ -52,9 +57,8 @@ private:
   VkSurfaceKHR surface;
   Swapchain swapchain;
 
-
   pipeline::PipelineManager *pipeline_manager;
-  resource_handler::ResourceHandler * resource_handler;
+  resource_handler::ResourceHandler *resource_handler;
 
   VmaAllocator vma_allocator;
 

@@ -3,7 +3,9 @@
 #include "platform/renderer/renderer.h"
 #include <chrono>
 
-game::Game::Game(render::IRenderContext &render_ctx)
+#include "platform/loader/scene_loader.h"
+
+game::Game::Game(render::RenderContext &render_ctx)
     : render_ctx(render_ctx), world() {
 
   time_data.delta_time = 0.0f;
@@ -11,6 +13,8 @@ game::Game::Game(render::IRenderContext &render_ctx)
   time_data.total_ticks = 0;
 
   world.insertResource<Time>(time_data);
+
+  gltf_load::loadScene(ASSET_PATH "/monke.glb", world, render_ctx);
 }
 
 game::Game::~Game() {}

@@ -11,7 +11,7 @@
 namespace gltf_load {
 
 static void loadScene(const std::string &path, vecs::Ecs &world,
-                      render::IRenderContext &render_ctx) {
+                      render::RenderContext &render_ctx) {
   using namespace tinygltf;
 
   Model model;
@@ -57,6 +57,9 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     vertex_data.resize(vertexCount);
 
     size_t stride = accessor.ByteStride(bufferView);
+    if (stride == 0)
+      stride = 3 * sizeof(float);
+
     for (size_t i = 0; i < vertexCount; i++) {
       const float *vertexPtr = reinterpret_cast<const float *>(
           &buffer
@@ -68,8 +71,7 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
   }
 
   if (p.indices >= 0) {
-    const tinygltf::Accessor &indexAccessor =
-        model.accessors[p.indices];
+    const tinygltf::Accessor &indexAccessor = model.accessors[p.indices];
     const tinygltf::BufferView &indexBufferView =
         model.bufferViews[indexAccessor.bufferView];
     const tinygltf::Buffer &indexBuffer = model.buffers[indexBufferView.buffer];
@@ -95,6 +97,17 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
       throw std::runtime_error("Unsupported index type");
     }
   }
+
+
+  std::cout << "Number of indices: " << indices.size() << "\n";
+
+  auto offset = render_ctx.writeToBuffer<vertex::Vertex>(vertex_data.data(), vertex_data.size());
+  auto i_offset = render_ctx.writeToBuffer<vertex::Index>(indices.data(), indices.size());
+
+
+  assert(offset == 0);
+  assert(i_offset == 0);
+
 }
 
 } // namespace gltf_load

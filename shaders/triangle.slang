@@ -1,3 +1,43 @@
+
+
+
+
+
+
+
+struct Vertex {
+
+  
+
+
+  float3 position;
+
+  float3 normal;
+
+  float3 tangent;
+
+  float3 bitangent;
+
+  float4 bone_ids;
+
+  float4 bone_weights;
+
+  float2 tex_coords;
+
+  
+};
+
+
+
+
+
+
+
+
+
+
+
+
 struct VSOut
 {
     float4 position : SV_Position;
@@ -22,24 +62,28 @@ Col *buffer_address;
 Sampler2D<float4> sampled_textures[];
 
 [shader("vertex")]
-VSOut vertexMain(uint id : SV_VertexID)
+VSOut vertexMain(Vertex in, uint id : SV_VertexID)
 {
     // Hardcoded triangle positions in clip space
-    float4 positions[3] = {
-        float4(-0.5, 0.5, 0, 1),
-        float4( 0.5, 0.5, 0, 1),
-        float4( 0.0,  -0.5, 0, 1)
-    };
 
-      float2 uvs[3] = {
-        float2(0,1),
-        float2(1,1),
-        float2(0.5, 0)
-    };
+    float4x4 view = float4x4(
+    0, 0, 1, 0,
+    0, 1, 0, 0,
+   -1, 0, 0, 0,
+    0, 0, 15, 1
+);
+
+float4x4 proj = float4x4(
+    1.3618, 0,      0,       0,
+    0,      2.4142, 0,       0,
+    0,      0,     -1.001,  -1,
+    0,      0,     -0.1001,  0
+);
+    
 
     VSOut output;
-    output.position = positions[id];
-    output.uv = uvs[id];
+    output.position = mul(proj, mul(view, float4(in.position, 1.0)));
+    output.uv = in.tex_coords;
     return output;
 }
 
@@ -50,11 +94,5 @@ VSOut vertexMain(uint id : SV_VertexID)
 float4 pixelMain(VSOut input) : SV_Target
 {
 
-    
-    Col bb = buffer_address[2];
-    
-
-    Sampler2D tex = sampled_textures[0];
-    float3 rgb = tex.Sample(input.uv).rgb;
-    return float4(bb.value, 1); // red triangle
+   return float4(1.0, 0.0, 0.0, 1.0);
 }

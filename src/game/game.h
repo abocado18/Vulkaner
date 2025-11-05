@@ -23,7 +23,7 @@ struct Time
 
 class Game {
 public:
-  Game(render::IRenderContext &render_ctx);
+  Game(render::RenderContext &render_ctx);
   ~Game();
 
 
@@ -40,7 +40,7 @@ private:
 
   std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start;
 
-  render::IRenderContext &render_ctx;
+  render::RenderContext &render_ctx;
 
 
   vecs::Schedule Startup = {};

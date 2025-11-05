@@ -445,8 +445,7 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     pipeline::PipelineData pipeline_data = {};
     pipeline::PipelineData::getDefault(pipeline_data);
     pipeline_data.rasterization_create_info.cullMode = VK_CULL_MODE_NONE;
-    pipeline_data.vertex_desc.attribute_descs.clear();
-    pipeline_data.vertex_desc.binding_descs.clear();
+  
 
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
 
@@ -763,14 +762,26 @@ void render::RenderContext::render() {
     vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    auto &b = resource_handler->getBufferPerType<Vector3>();
+    auto &b = resource_handler->getBufferPerType<vertex::Vertex>();
+    auto &a = resource_handler->getBufferPerType<vertex::Index>();
 
     vkCmdPushConstants(graphics_command_buffer,
                        pipeline_manager->getPipelineByName("triangle").layout,
                        VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b.address),
                        &b.address);
 
-    vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
+    vkCmdPushConstants(graphics_command_buffer,
+                       pipeline_manager->getPipelineByName("triangle").layout,
+                       VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(b.address),
+                       sizeof(a.address), &a.address);
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &b.buffer, &offset);
+    vkCmdBindIndexBuffer(graphics_command_buffer, a.buffer, 0,
+                         VK_INDEX_TYPE_UINT32);
+
+    // vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
+    vkCmdDrawIndexed(graphics_command_buffer, 2904, 1, 0, 0, 0);
 
     vkCmdEndRenderingKHR(graphics_command_buffer);
   }
