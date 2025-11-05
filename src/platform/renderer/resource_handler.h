@@ -343,6 +343,9 @@ public:
 
   uint64_t insertResource(Resource &resource);
 
+  uint64_t createImage(uint32_t width, uint32_t height,
+                       VkImageUsageFlags image_usage, VkFormat image_format);
+
   uint64_t loadImage(const std::string &path, VkFormat image_format,
                      VkImageUsageFlags image_usage);
 

@@ -224,81 +224,8 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     return UINT64_MAX;
   }
 
-  uint64_t resource_index = UINT64_MAX;
-  {
-
-    Image new_image = {};
-    new_image.current_layout = ImageLayouts::UNDEFINED;
-    new_image.range.layerCount = 1;
-    new_image.range.levelCount = 1;
-    new_image.range.baseMipLevel = 0;
-    new_image.range.baseArrayLayer = 0;
-    new_image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    new_image.extent = {static_cast<uint32_t>(width),
-                        static_cast<uint32_t>(height), 1};
-
-    VkImageCreateInfo image_create_info = {};
-    image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_create_info.imageType = VK_IMAGE_TYPE_2D;
-    image_create_info.usage = image_usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_create_info.queueFamilyIndexCount = 1;
-    image_create_info.pQueueFamilyIndices = &transfer_queue_index;
-    image_create_info.extent = {static_cast<uint32_t>(width),
-                                static_cast<uint32_t>(height), 1};
-
-    image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    image_create_info.arrayLayers = 1;
-    image_create_info.format = image_format;
-    image_create_info.mipLevels = 1;
-
-    VmaAllocationCreateInfo allocation_create_info = {};
-    allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
-    allocation_create_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    VK_ERROR(vmaCreateImage(allocator, &image_create_info,
-                            &allocation_create_info, &new_image.image,
-                            &new_image.allocation, &new_image.allocation_info));
-
-    VkImageViewCreateInfo view_create_info = {};
-    view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view_create_info.image = new_image.image;
-    view_create_info.subresourceRange = new_image.range;
-    view_create_info.format = image_format;
-
-    VK_ERROR(vkCreateImageView(this->device, &view_create_info, nullptr,
-                               &new_image.view));
-
-    {
-      VkSamplerCreateInfo sampler_create_info = {};
-      sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-      sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-      sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-      sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-      sampler_create_info.anisotropyEnable = VK_FALSE;
-      sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-      sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-      sampler_create_info.compareEnable = VK_FALSE;
-      sampler_create_info.compareOp = VK_COMPARE_OP_NEVER;
-      sampler_create_info.magFilter = VK_FILTER_LINEAR;
-      sampler_create_info.maxAnisotropy = 1.0f;
-      sampler_create_info.maxLod = 0.0f;
-      sampler_create_info.minFilter = VK_FILTER_LINEAR;
-      sampler_create_info.mipLodBias = 0.0f;
-
-      VK_ERROR(vkCreateSampler(this->device, &sampler_create_info, nullptr,
-                               &new_image.sampler));
-    }
-
-    Resource new_resource = {};
-    new_resource.type = ResourceType::IMAGE;
-    new_resource.resource_data.image = new_image;
-
-    resource_index = insertResource(new_resource);
-  }
+  uint64_t resource_index =
+      this->createImage(width, height, image_usage, image_format);
 
   {
     std::memcpy(reinterpret_cast<uint8_t *>(
@@ -308,7 +235,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
 
     transfer_data.source_offset = staging_buffer.offset;
     transfer_data.size = width * height * 4;
- 
+
     transfer_data.target_offset = 0;
     transfer_data.resource_idx = resource_index;
   }
@@ -375,4 +302,86 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
 
   r.resource_data.image.sampled_image_binding_slot = binding_slot;
   return binding_slot;
+}
+
+uint64_t
+resource_handler::ResourceHandler::createImage(uint32_t width, uint32_t height,
+                                               VkImageUsageFlags image_usage,
+                                               VkFormat image_format) {
+
+  uint64_t resource_index = UINT64_MAX;
+
+  Image new_image = {};
+  new_image.current_layout = ImageLayouts::UNDEFINED;
+  new_image.range.layerCount = 1;
+  new_image.range.levelCount = 1;
+  new_image.range.baseMipLevel = 0;
+  new_image.range.baseArrayLayer = 0;
+  new_image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  new_image.extent = {static_cast<uint32_t>(width),
+                      static_cast<uint32_t>(height), 1};
+
+  VkImageCreateInfo image_create_info = {};
+  image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_create_info.imageType = VK_IMAGE_TYPE_2D;
+  image_create_info.usage = image_usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  image_create_info.queueFamilyIndexCount = 1;
+  image_create_info.pQueueFamilyIndices = &transfer_queue_index;
+  image_create_info.extent = {static_cast<uint32_t>(width),
+                              static_cast<uint32_t>(height), 1};
+
+  image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_create_info.arrayLayers = 1;
+  image_create_info.format = image_format;
+  image_create_info.mipLevels = 1;
+
+  VmaAllocationCreateInfo allocation_create_info = {};
+  allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
+  allocation_create_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+  VK_ERROR(vmaCreateImage(allocator, &image_create_info,
+                          &allocation_create_info, &new_image.image,
+                          &new_image.allocation, &new_image.allocation_info));
+
+  VkImageViewCreateInfo view_create_info = {};
+  view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_create_info.image = new_image.image;
+  view_create_info.subresourceRange = new_image.range;
+  view_create_info.format = image_format;
+
+  VK_ERROR(vkCreateImageView(this->device, &view_create_info, nullptr,
+                             &new_image.view));
+
+  {
+    VkSamplerCreateInfo sampler_create_info = {};
+    sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.anisotropyEnable = VK_FALSE;
+    sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    sampler_create_info.compareEnable = VK_FALSE;
+    sampler_create_info.compareOp = VK_COMPARE_OP_NEVER;
+    sampler_create_info.magFilter = VK_FILTER_LINEAR;
+    sampler_create_info.maxAnisotropy = 1.0f;
+    sampler_create_info.maxLod = 0.0f;
+    sampler_create_info.minFilter = VK_FILTER_LINEAR;
+    sampler_create_info.mipLodBias = 0.0f;
+
+    VK_ERROR(vkCreateSampler(this->device, &sampler_create_info, nullptr,
+                             &new_image.sampler));
+  }
+
+  Resource new_resource = {};
+  new_resource.type = ResourceType::IMAGE;
+  new_resource.resource_data.image = new_image;
+
+  resource_index = insertResource(new_resource);
+
+  return resource_index;
 }
