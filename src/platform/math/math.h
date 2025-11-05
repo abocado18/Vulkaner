@@ -273,7 +273,7 @@ template <typename T> struct Mat4 {
     return R;
   }
 
-  Mat4<T> perspective(T fov_y, T aspect, T near_plane, T far_plane) {
+  static Mat4<T> perspective(T fov_y, T aspect, T near_plane, T far_plane) {
 
     T f = 1 / std::tan(fov_y * 0.5);
 
@@ -285,6 +285,8 @@ template <typename T> struct Mat4 {
     proj(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
     proj(3, 2) = -1;
     proj(3, 3) = 0;
+
+    return proj;
   }
 
   static Mat4<T> orthographic(T left, T right, T bottom, T top, T near_plane,
@@ -324,7 +326,7 @@ template <typename T> struct Mat4 {
 
     view(0, 3) = -s.x * eye.x - s.y * eye.y - s.z * eye.z;
     view(1, 3) = -u.x * eye.x - u.y * eye.y - u.z * eye.z;
-    view(2, 3) = f.x * eye.x + f.y * eye.y + f.z * eye.z;
+    view(2, 3) = -f.x * eye.x - f.y * eye.y - f.z * eye.z;
 
     return view;
   }
@@ -339,7 +341,7 @@ template <typename T> struct Mat4 {
         m(i, j) = 0;
 
         for (size_t k = 0; k < 4; k++) {
-          m(i, j) += values(i, k) * other.values(k, j);
+          m(i, j) += (*this)(i, k) * other(k, j);
         }
       }
     }
@@ -353,7 +355,7 @@ template <typename T> struct Mat4 {
 
     for (size_t i = 0; i < 4; i++) {
       for (size_t j = 0; j < 4; j++) {
-        p.values(i, j) = values(i, j) + other.values(i, j);
+        p(i, j) = (*this)(i, j) + other(i, j);
       }
     }
 
@@ -366,16 +368,16 @@ template <typename T> struct Mat4 {
 
     for (size_t i = 0; i < 4; i++) {
       for (size_t j = 0; j < 4; j++) {
-        m.values(i, j) = values(i, j) - other.values(i, j);
+        m(i, j) = (*this)(i, j) - other(i, j);
       }
     }
 
     return m;
   }
 
-  T &operator()(const size_t i, const size_t j) { return values[i * 4 + j]; };
+  T &operator()(const size_t i, const size_t j) { return values[j * 4 + i]; };
 
   const T &operator()(const size_t i, const size_t j) const {
-    return values[i * 4 + j];
+    return values[j * 4 + i];
   };
 };
