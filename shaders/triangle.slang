@@ -94,5 +94,5 @@ VSOut vertexMain(Vertex in, uint id : SV_VertexID)
 float4 pixelMain(VSOut input) : SV_Target
 {
 
-   return float4(1.0, 0.0, 1.0, 1.0);
+   return float4(1.0, 0.0, 0.0, 1.0);
 }

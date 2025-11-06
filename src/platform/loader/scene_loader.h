@@ -6,6 +6,7 @@
 
 #include "game/ecs/vox_ecs.h"
 #include "platform/renderer/renderer.h"
+#include "platform/renderer/material.h"
 #include <vector>
 
 namespace gltf_load {

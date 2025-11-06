@@ -351,6 +351,9 @@ public:
 
   uint64_t bindSampledImage(uint64_t resource_idx);
 
+
+  void destroyResource(uint64_t idx);
+
   // Create buffer and caches in hashmap, returns resource index
   template <typename T>
   uint64_t createBuffer(uint32_t size, BufferUsages buffer_usage) {

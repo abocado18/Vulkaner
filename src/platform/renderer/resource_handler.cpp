@@ -385,3 +385,28 @@ resource_handler::ResourceHandler::createImage(uint32_t width, uint32_t height,
 
   return resource_index;
 }
+
+void resource_handler::ResourceHandler::destroyResource(uint64_t idx) {
+  auto it = resources.find(idx);
+
+  if (it == resources.end()) {
+    return;
+  }
+
+  auto &r = it->second;
+
+  if (r.type == ResourceType::IMAGE) {
+    vkDestroySampler(device, r.resource_data.image.sampler, nullptr);
+
+    vkDestroyImageView(device, r.resource_data.image.view, nullptr);
+
+    vmaDestroyImage(allocator, r.resource_data.image.image,
+                    r.resource_data.image.allocation);
+
+    resources.erase(idx);
+  } else if (r.type == ResourceType::BUFFER) {
+    vmaDestroyBuffer(allocator, r.resource_data.buffer.buffer,
+                     r.resource_data.buffer.allocation);
+    resources.erase(idx);
+  }
+}
