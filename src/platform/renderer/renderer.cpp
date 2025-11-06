@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -445,7 +446,6 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     pipeline::PipelineData pipeline_data = {};
     pipeline::PipelineData::getDefault(pipeline_data);
     pipeline_data.rasterization_create_info.cullMode = VK_CULL_MODE_NONE;
-  
 
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
 
@@ -570,26 +570,25 @@ void render::RenderContext::render() {
 
       const auto &target = resource_handler->getResource(t.resource_idx);
 
-      if (target.type == resource_handler::ResourceType::IMAGE) {
+      if (std::holds_alternative<resource_handler::Image>(
+              target.resource_data)) {
+
+        auto &image = std::get<resource_handler::Image>(target.resource_data);
 
         VkBufferImageCopy2KHR region = {};
         region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2_KHR;
-        region.imageSubresource.aspectMask =
-            target.resource_data.image.range.aspectMask;
-        region.imageSubresource.baseArrayLayer =
-            target.resource_data.image.range.baseArrayLayer;
-        region.imageSubresource.layerCount =
-            target.resource_data.image.range.layerCount;
-        region.imageSubresource.mipLevel =
-            target.resource_data.image.range.baseMipLevel;
+        region.imageSubresource.aspectMask = image.range.aspectMask;
+        region.imageSubresource.baseArrayLayer = image.range.baseArrayLayer;
+        region.imageSubresource.layerCount = image.range.layerCount;
+        region.imageSubresource.mipLevel = image.range.baseMipLevel;
         region.imageOffset = {0, 0, 0};
-        region.imageExtent = target.resource_data.image.extent;
+        region.imageExtent = image.extent;
 
         region.bufferOffset = t.source_offset;
 
         VkCopyBufferToImageInfo2KHR image_info = {};
         image_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR;
-        image_info.dstImage = target.resource_data.image.image;
+        image_info.dstImage = image.image;
         image_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
         image_info.regionCount = 1;
@@ -631,6 +630,8 @@ void render::RenderContext::render() {
 
       } else {
 
+        auto &buffer = std::get<resource_handler::Buffer>(target.resource_data);
+
         auto &staging_buffer = resource_handler->getStagingBuffer();
 
         VkBufferCopy2KHR region = {};
@@ -642,7 +643,7 @@ void render::RenderContext::render() {
         VkCopyBufferInfo2KHR copy_buffer_info = {};
         copy_buffer_info.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2_KHR;
         copy_buffer_info.srcBuffer = staging_buffer;
-        copy_buffer_info.dstBuffer = target.resource_data.buffer.buffer;
+        copy_buffer_info.dstBuffer = buffer.buffer;
         copy_buffer_info.regionCount = 1;
         copy_buffer_info.pRegions = &region;
 
@@ -969,15 +970,19 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
 
   for (size_t i = 0; i < swapchain_image_count; i++) {
 
-    resource_handler::Resource resource = {};
-    resource.type = resource_handler::ResourceType::IMAGE;
-    resource.resource_data.image.image = swapchain.images[i];
-    resource.resource_data.image.current_layout = resource_handler::UNDEFINED;
-    resource.resource_data.image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    resource.resource_data.image.range.baseArrayLayer = 0;
-    resource.resource_data.image.range.baseMipLevel = 0;
-    resource.resource_data.image.range.layerCount = 1;
-    resource.resource_data.image.range.levelCount = 1;
+    resource_handler::Resource resource(device, vma_allocator);
+
+    resource_handler::Image image = {};
+
+    image.image = swapchain.images[i];
+    image.current_layout = resource_handler::UNDEFINED;
+    image.range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image.range.baseArrayLayer = 0;
+    image.range.baseMipLevel = 0;
+    image.range.layerCount = 1;
+    image.range.levelCount = 1;
+
+    resource.resource_data = image;
 
     swapchain.resource_image_indices[i] =
         resource_handler->insertResource(resource);

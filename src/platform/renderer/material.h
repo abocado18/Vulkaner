@@ -11,13 +11,14 @@
 
 namespace material {
 
-struct TextureHandle {
 
-  TextureHandle() = default;
-  ~TextureHandle() = default;
+struct TextureRef
+{
 
-  uint64_t value;
 };
+
+
+using TextureHandle = std::shared_ptr<uint64_t>;
 
 class MaterialManager {
 
@@ -28,7 +29,6 @@ public:
   template <typename T> void getNewTextureHandle() {}
 
 private:
-  std::unordered_map<TextureHandle, uint64_t> texture_reference_counter = {};
 };
 
 } // namespace material

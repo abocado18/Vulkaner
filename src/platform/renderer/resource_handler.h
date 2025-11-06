@@ -6,10 +6,12 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -276,6 +278,9 @@ struct TransistionData {
 };
 
 struct Image {
+
+  Image() = default;
+
   VkImage image;
   ImageLayouts current_layout;
   VkImageSubresourceRange range;
@@ -310,14 +315,36 @@ struct Descriptor {
   VkDescriptorPool pool;
 };
 
-struct Resource {
+class Resource {
 
-  ResourceType type;
+public:
+  Resource(VkDevice &device, VmaAllocator &allocator)
+      : device(&device), allocator(&allocator) {}
 
-  union {
-    Image image;
-    Buffer buffer;
-  } resource_data;
+  ~Resource() {
+    if (std::holds_alternative<Image>(resource_data)) {
+
+      auto &image = std::get<Image>(resource_data);
+
+      vkDestroySampler(*device, image.sampler, nullptr);
+
+      vkDestroyImageView(*device, image.view, nullptr);
+
+      vmaDestroyImage(*allocator, image.image, image.allocation);
+
+    } else if (std::holds_alternative<Buffer>(resource_data)) {
+
+      auto &buffer = std::get<Buffer>(resource_data);
+
+      vmaDestroyBuffer(*allocator, buffer.buffer, buffer.allocation);
+    }
+  }
+
+  std::variant<Image, Buffer> resource_data;
+
+private:
+  VkDevice *device;
+  VmaAllocator *allocator;
 };
 
 struct StagingTransferData {
@@ -328,6 +355,12 @@ struct StagingTransferData {
   uint32_t source_offset;
   uint32_t target_offset;
   uint32_t size;
+};
+
+struct ResourceHandle {
+  uint64_t idx;
+
+  std::variant<std::shared_ptr<Resource>, Resource *> r;
 };
 
 class ResourceHandler {
@@ -341,22 +374,25 @@ public:
                          TransistionData transistion_data,
                          uint64_t resource_idx);
 
-  uint64_t insertResource(Resource &resource);
+  uint64_t insertResource(std::variant<std::weak_ptr<Resource>, Resource *> resource);
+
 
   uint64_t createImage(uint32_t width, uint32_t height,
-                       VkImageUsageFlags image_usage, VkFormat image_format);
+                                VkImageUsageFlags image_usage,
+                                VkFormat image_format);
+
+
 
   uint64_t loadImage(const std::string &path, VkFormat image_format,
                      VkImageUsageFlags image_usage);
 
   uint64_t bindSampledImage(uint64_t resource_idx);
 
-
   void destroyResource(uint64_t idx);
 
   // Create buffer and caches in hashmap, returns resource index
   template <typename T>
-  uint64_t createBuffer(uint32_t size, BufferUsages buffer_usage) {
+  uint64_t createBuffer(uint32_t size, BufferUsages buffer_usage, bool is_permanent = false) {
     Buffer buffer;
 
     {
@@ -396,21 +432,101 @@ public:
     buffer.address = vkGetBufferDeviceAddressKHR(device, &address_info);
     buffer.offset = 0;
 
-    Resource r = {};
-    r.type = ResourceType::BUFFER;
-    r.resource_data.buffer = buffer;
-    r.resource_data.buffer.current_buffer_usage =
-        BufferUsages::BUFFER_USAGE_UNDEFINED;
-    r.resource_data.buffer.size = sizeof(T) * size;
+    Resource r(device, allocator);
 
-    uint64_t resource_idx = insertResource(r);
+    r.resource_data = buffer;
+    auto &buf = std::get<Buffer>(r.resource_data);
+
+    buf.current_buffer_usage = BufferUsages::BUFFER_USAGE_UNDEFINED;
+    buf.size = sizeof(T) * size;
+
+
+    uint64_t resource_idx;
+
+    if(is_permanent)
+    {
+      std::unique_ptr<Resource> unique_r = std::make_unique<Resource>(r);
+
+      resource_idx = insertResource(unique_r);
+    }
+    else {
+      
+    }
+
+    uint64_t resource_idx = insertResource(&r);
 
     buffers_per_type[typeid(T)] = resource_idx;
 
     return resource_idx;
   }
 
-  const Resource &getResource(uint64_t idx) const { return resources.at(idx); };
+  // Create buffer and caches in hashmap, returns resource index
+  template <typename T>
+  uint64_t createPermanentBuffer(uint32_t size, BufferUsages buffer_usage) {
+    Buffer buffer;
+
+    {
+      if (buffers_per_type.find(std::type_index(typeid(T))) !=
+          buffers_per_type.end()) {
+        std::cerr << "Buffer of Type " << typeid(T).name()
+                  << " already exists\n";
+
+        return UINT64_MAX;
+      }
+    }
+
+    VkBufferCreateInfo buffer_create_info = {};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.queueFamilyIndexCount = 1;
+    buffer_create_info.pQueueFamilyIndices = &transfer_queue_index;
+    buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_create_info.size = sizeof(T) * size;
+    buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+                               getBufferUsageFlags(buffer_usage);
+
+    VmaAllocationCreateInfo alloc_create_info = {};
+    alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    alloc_create_info.priority = 1.0f;
+    assert(buffer_create_info.size > 0);
+
+    VK_ERROR(vmaCreateBuffer(allocator, &buffer_create_info, &alloc_create_info,
+                             &buffer.buffer, &buffer.allocation,
+                             &buffer.allocation_info));
+
+    VkBufferDeviceAddressInfoKHR address_info = {};
+    address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+    address_info.buffer = buffer.buffer;
+
+    buffer.address = vkGetBufferDeviceAddressKHR(device, &address_info);
+    buffer.offset = 0;
+
+    Resource r(device, allocator);
+
+    r.resource_data = buffer;
+    auto &buf = std::get<Buffer>(r.resource_data);
+
+    buf.current_buffer_usage = BufferUsages::BUFFER_USAGE_UNDEFINED;
+    buf.size = sizeof(T) * size;
+
+    uint64_t resource_idx = insertPermanentResource(r);
+
+    buffers_per_type[typeid(T)] = resource_idx;
+
+    return resource_idx;
+  }
+
+  ResourceHandle getResource(uint64_t idx) const {
+
+    const auto &r = resources.at(idx);
+
+    if (std::holds_alternative<std::weak_ptr<Resource>>(r)) {
+      return {idx, std::get<std::weak_ptr<Resource>>(r).lock()};
+    } else {
+      return {idx, std::get<std::unique_ptr<Resource>>(r).get()};
+    }
+  };
 
   // writes to position in buffer and returns correct element index
   template <typename T>
@@ -429,16 +545,21 @@ public:
 
     uint64_t buffer_resource_index = it->second;
 
-    Resource &buffer_resource = resources.at(buffer_resource_index);
+    auto &variant_resource = resources.at(buffer_resource_index);
+
+    Resource *buffer_resource =
+        std::holds_alternative<std::weak_ptr<Resource>>(variant_resource)
+            ? std::get<std::weak_ptr<Resource>>(variant_resource).lock().get()
+            : std::get<std::unique_ptr<Resource>>(variant_resource).get();
+
+    auto &buf = std::get<Buffer>(buffer_resource->resource_data);
 
     if (staging_buffer.offset + total_size > staging_buffer.size) {
       std::cout << "Max size of staging buffer reached\n";
       return UINT32_MAX;
     }
 
-    if (index == UINT32_MAX &&
-        buffer_resource.resource_data.buffer.offset + total_size >
-            buffer_resource.resource_data.buffer.size) {
+    if (index == UINT32_MAX && buf.offset + total_size > buf.size) {
       std::cout << "Full size of buffer reached\n";
       return UINT32_MAX;
     }
@@ -454,14 +575,13 @@ public:
     transfer_data.resource_idx = buffer_resource_index;
 
     transfer_data.target_offset =
-        index == UINT32_MAX ? buffer_resource.resource_data.buffer.offset
-                            : index * sizeof(T);
+        index == UINT32_MAX ? buf.offset : index * sizeof(T);
 
     {
       staging_buffer.offset += total_size;
 
       if (index == UINT32_MAX)
-        buffer_resource.resource_data.buffer.offset += total_size;
+        buf.offset += total_size;
     }
 
     transfers.push_back(transfer_data);
@@ -471,10 +591,17 @@ public:
     return element_index;
   }
 
-  template <typename T> Buffer &getBufferPerType() {
+  template <typename T> ResourceHandle getBufferPerType() {
     uint64_t idx = buffers_per_type.at(typeid(T));
 
-    return resources.at(idx).resource_data.buffer;
+    auto &r = resources.at(idx);
+
+    if (std::holds_alternative<std::weak_ptr<Resource>>(r)) {
+      return {idx, std::get<std::weak_ptr<Resource>>(r).lock()};
+    } else {
+
+      return {idx, std::get<std::unique_ptr<Resource>>(r).get()};
+    }
   }
 
   std::vector<StagingTransferData> &getStagingTransferData();
@@ -488,7 +615,10 @@ public:
   }
 
 private:
-  std::unordered_map<uint64_t, Resource> resources = {};
+  // Weak ptr for transient, directly for permanent resources
+  std::unordered_map<uint64_t, std::variant<std::weak_ptr<Resource>,
+                                            std::unique_ptr<Resource>>>
+      resources = {};
 
   VkPhysicalDeviceProperties device_properties;
   VkDevice &device;

@@ -2,6 +2,7 @@
 #include "vulkan_macros.h"
 #include <cstdint>
 #include <cstring>
+#include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -121,12 +122,22 @@ resource_handler::ResourceHandler::~ResourceHandler() {
   vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
 
-uint64_t resource_handler::ResourceHandler::insertResource(
+uint64_t resource_handler::ResourceHandler::insertTransientResource(
     resource_handler::Resource &resource) {
   static uint64_t next_id = 0;
   uint64_t id = next_id++;
 
-  this->resources.insert_or_assign(id, resource);
+  this->transient_resources.insert_or_assign(id, resource);
+
+  return id;
+}
+
+uint64_t resource_handler::ResourceHandler::insertPermanentResource(
+    resource_handler::Resource &resource) {
+  static uint64_t next_id = 0;
+  uint64_t id = next_id++;
+
+  this->permanent_resources.insert_or_assign(id, resource);
 
   return id;
 }
@@ -142,26 +153,25 @@ void resource_handler::ResourceHandler::updateTransistion(
 
   Resource &resource = it->second;
 
-  if (resource.type == resource_handler::ResourceType::IMAGE) {
+  if (std::holds_alternative<Image>(resource.resource_data)) {
     // Replace later with resource transistion manager update
+
+    auto &image = std::get<Image>(resource.resource_data);
 
     VkImageMemoryBarrier2KHR memory_barrier = {};
     memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
-    memory_barrier.oldLayout =
-        getImageLayout(resource.resource_data.image.current_layout);
+    memory_barrier.oldLayout = getImageLayout(image.current_layout);
     memory_barrier.newLayout =
         getImageLayout(transistion_data.data.image_data.image_layout);
-    memory_barrier.srcStageMask =
-        getStageMask(resource.resource_data.image.current_layout);
+    memory_barrier.srcStageMask = getStageMask(image.current_layout);
 
-    memory_barrier.srcAccessMask =
-        getAccessMask(resource.resource_data.image.current_layout);
+    memory_barrier.srcAccessMask = getAccessMask(image.current_layout);
     memory_barrier.dstAccessMask =
         getAccessMask(transistion_data.data.image_data.image_layout);
     memory_barrier.dstStageMask =
         getStageMask(transistion_data.data.image_data.image_layout);
-    memory_barrier.image = resource.resource_data.image.image;
-    memory_barrier.subresourceRange = resource.resource_data.image.range;
+    memory_barrier.image = image.image;
+    memory_barrier.subresourceRange = image.range;
 
     memory_barrier.srcQueueFamilyIndex = transistion_data.source_queue_family;
     memory_barrier.dstQueueFamilyIndex = transistion_data.dst_queue_family;
@@ -174,27 +184,26 @@ void resource_handler::ResourceHandler::updateTransistion(
     vkCmdPipelineBarrier2KHR(command_buffer, &dependency_info);
 
     // Update Layout
-    resource.resource_data.image.current_layout =
-        transistion_data.data.image_data.image_layout;
+    image.current_layout = transistion_data.data.image_data.image_layout;
 
   } else {
+
+    auto buffer = std::get<Buffer>(resource.resource_data);
 
     // To do: Add Transisition Logic for Buffers
     VkBufferMemoryBarrier2KHR memory_barrier = {};
     memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
-    memory_barrier.buffer = resource.resource_data.buffer.buffer;
+    memory_barrier.buffer = buffer.buffer;
     memory_barrier.dstAccessMask =
         getAccessMask(transistion_data.data.buffer_data.buffer_usage);
-    memory_barrier.srcAccessMask =
-        getAccessMask(resource.resource_data.buffer.current_buffer_usage);
-    memory_barrier.srcStageMask =
-        getStageMask(resource.resource_data.buffer.current_buffer_usage);
+    memory_barrier.srcAccessMask = getAccessMask(buffer.current_buffer_usage);
+    memory_barrier.srcStageMask = getStageMask(buffer.current_buffer_usage);
     memory_barrier.dstStageMask =
         getStageMask(transistion_data.data.buffer_data.buffer_usage);
     memory_barrier.dstQueueFamilyIndex = transistion_data.dst_queue_family;
     memory_barrier.srcQueueFamilyIndex = transistion_data.source_queue_family;
     memory_barrier.offset = 0;
-    memory_barrier.size = resource.resource_data.buffer.size;
+    memory_barrier.size = buffer.size;
 
     VkDependencyInfoKHR dependency_info = {};
     dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
@@ -203,7 +212,7 @@ void resource_handler::ResourceHandler::updateTransistion(
 
     vkCmdPipelineBarrier2KHR(command_buffer, &dependency_info);
 
-    resource.resource_data.buffer.current_buffer_usage =
+    buffer.current_buffer_usage =
         transistion_data.data.buffer_data.buffer_usage;
   }
 }
@@ -271,22 +280,24 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
 
   Resource &r = it->second;
 
-  if (r.type != ResourceType::IMAGE) {
+  if (std::holds_alternative<Image>(r.resource_data) == false) {
     return UINT64_MAX;
   }
 
-  if (r.resource_data.image.sampled_image_binding_slot != UINT64_MAX) {
+  auto &image = std::get<Image>(r.resource_data);
+
+  if (image.sampled_image_binding_slot != UINT64_MAX) {
     // Already bound
 
-    return r.resource_data.image.sampled_image_binding_slot;
+    return image.sampled_image_binding_slot;
   }
 
   uint64_t binding_slot = getNewSampledImageBindingSlot();
 
   VkDescriptorImageInfo image_info = {};
   image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  image_info.imageView = r.resource_data.image.view;
-  image_info.sampler = r.resource_data.image.sampler;
+  image_info.imageView = image.view;
+  image_info.sampler = image.sampler;
 
   VkWriteDescriptorSet write = {};
   write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -300,7 +311,7 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
 
   vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
-  r.resource_data.image.sampled_image_binding_slot = binding_slot;
+  image.sampled_image_binding_slot = binding_slot;
   return binding_slot;
 }
 
@@ -377,9 +388,9 @@ resource_handler::ResourceHandler::createImage(uint32_t width, uint32_t height,
                              &new_image.sampler));
   }
 
-  Resource new_resource = {};
-  new_resource.type = ResourceType::IMAGE;
-  new_resource.resource_data.image = new_image;
+  Resource new_resource(device, allocator);
+
+  new_resource.resource_data = new_image;
 
   resource_index = insertResource(new_resource);
 
@@ -395,18 +406,22 @@ void resource_handler::ResourceHandler::destroyResource(uint64_t idx) {
 
   auto &r = it->second;
 
-  if (r.type == ResourceType::IMAGE) {
-    vkDestroySampler(device, r.resource_data.image.sampler, nullptr);
+  if (std::holds_alternative<Image>(r.resource_data)) {
 
-    vkDestroyImageView(device, r.resource_data.image.view, nullptr);
+    auto &image = std::get<Image>(r.resource_data);
 
-    vmaDestroyImage(allocator, r.resource_data.image.image,
-                    r.resource_data.image.allocation);
+    vkDestroySampler(device, image.sampler, nullptr);
+
+    vkDestroyImageView(device, image.view, nullptr);
+
+    vmaDestroyImage(allocator, image.image, image.allocation);
 
     resources.erase(idx);
-  } else if (r.type == ResourceType::BUFFER) {
-    vmaDestroyBuffer(allocator, r.resource_data.buffer.buffer,
-                     r.resource_data.buffer.allocation);
+  } else if (std::holds_alternative<Buffer>(r.resource_data)) {
+
+    auto &buffer = std::get<Buffer>(r.resource_data);
+
+    vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
     resources.erase(idx);
   }
 }
