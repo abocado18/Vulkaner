@@ -115,6 +115,9 @@ resource_handler::ResourceHandler::~ResourceHandler() {
 
   vkDeviceWaitIdle(device);
 
+
+  
+
   vkDestroyDescriptorSetLayout(device, sampled_images_descriptor.layout,
                                nullptr);
 

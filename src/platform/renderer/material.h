@@ -11,24 +11,17 @@
 
 namespace material {
 
-
-struct TextureRef
-{
-
+struct BaseMaterial {
+  virtual ~BaseMaterial() {};
 };
 
+struct MaterialHandle {
+  resource_handler::ResourceHandle
+      material_buffer; // Handle to correct Gpu Buffer
 
-using TextureHandle = std::shared_ptr<uint64_t>;
+  uint64_t index = UINT64_MAX; // Index into the buffer
 
-class MaterialManager {
-
-public:
-  MaterialManager() = default;
-  ~MaterialManager() = default;
-
-  template <typename T> void getNewTextureHandle() {}
-
-private:
+  std::unique_ptr<BaseMaterial> cpu_material_reference;
 };
 
 } // namespace material

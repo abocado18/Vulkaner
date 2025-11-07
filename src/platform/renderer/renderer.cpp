@@ -451,8 +451,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
 
     auto bbb = resource_handler->loadImage(SHADER_PATH "/zelda.jpg",
-                                                  VK_FORMAT_R8G8B8A8_UNORM,
-                                                  VK_IMAGE_USAGE_SAMPLED_BIT);
+                                           VK_FORMAT_R8G8B8A8_UNORM,
+                                           VK_IMAGE_USAGE_SAMPLED_BIT);
 
     auto key = resource_handler->createBuffer<Vector3>(
         500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER, false);
@@ -771,23 +771,21 @@ void render::RenderContext::render() {
     auto *b = resource_handler->getBufferPerType<vertex::Vertex>();
     auto *a = resource_handler->getBufferPerType<vertex::Index>();
 
-    vkCmdPushConstants(graphics_command_buffer,
-                       pipeline_manager->getPipelineByName("triangle").layout,
-                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b->address),
-                       &b->address);
+    auto *c = resource_handler->getBufferPerType<Vector3>();
 
-    vkCmdPushConstants(graphics_command_buffer,
-                       pipeline_manager->getPipelineByName("triangle").layout,
-                       VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(b->address),
-                       sizeof(a->address), &a->address);
+    if (c != nullptr)
+      vkCmdPushConstants(graphics_command_buffer,
+                         pipeline_manager->getPipelineByName("triangle").layout,
+                         VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(c->address),
+                         &c->address);
 
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &b->buffer, &offset);
     vkCmdBindIndexBuffer(graphics_command_buffer, a->buffer, 0,
                          VK_INDEX_TYPE_UINT32);
 
-     vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
-    //vkCmdDrawIndexed(graphics_command_buffer, 2904, 1, 0, 0, 0);
+    vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
+    // vkCmdDrawIndexed(graphics_command_buffer, 2904, 1, 0, 0, 0);
 
     vkCmdEndRenderingKHR(graphics_command_buffer);
   }
@@ -976,7 +974,8 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
   for (size_t i = 0; i < swapchain_image_count; i++) {
 
     std::unique_ptr<resource_handler::Resource> resource =
-        std::make_unique<resource_handler::Resource>(device, vma_allocator, false);
+        std::make_unique<resource_handler::Resource>(device, vma_allocator,
+                                                     false);
 
     resource_handler::Image image = {};
 

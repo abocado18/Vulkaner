@@ -36,7 +36,11 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     printf("Failed to parse glTF: %s\n", path.c_str());
   }
 
+  
+
   auto &p = model.meshes[0].primitives[0];
+
+  
 
   std::vector<vertex::Vertex> vertex_data = {};
   std::vector<vertex::Index> indices = {};
@@ -47,6 +51,8 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     const tinygltf::BufferView &bufferView =
         model.bufferViews[accessor.bufferView];
     const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+
+
 
     // Pointer to the vertex data
     const float *vertices = reinterpret_cast<const float *>(

@@ -332,11 +332,14 @@ public:
 
       auto &image = std::get<Image>(resource_data);
 
-      vkDestroySampler(*device, image.sampler, nullptr);
+      if (image.sampler)
+        vkDestroySampler(*device, image.sampler, nullptr);
 
-      vkDestroyImageView(*device, image.view, nullptr);
+      if (image.view)
+        vkDestroyImageView(*device, image.view, nullptr);
 
-      vmaDestroyImage(*allocator, image.image, image.allocation);
+      if (image.image)
+        vmaDestroyImage(*allocator, image.image, image.allocation);
 
     } else if (std::holds_alternative<Buffer>(resource_data)) {
 
@@ -366,7 +369,9 @@ struct StagingTransferData {
 };
 
 struct ResourceHandle {
-  uint64_t idx;
+
+
+  const uint64_t idx;
 
   std::variant<std::shared_ptr<Resource>, Resource *> r;
 };
@@ -549,6 +554,7 @@ public:
     return element_index;
   }
 
+  // Returns Pointer to buffer, nullptr if buffer does not exist
   template <typename T> Buffer *getBufferPerType() {
 
     uint64_t idx = buffers_per_type.at(typeid(T));
@@ -558,6 +564,9 @@ public:
     if (std::holds_alternative<std::weak_ptr<Resource>>(r)) {
 
       auto *ref = std::get<std::weak_ptr<Resource>>(r).lock().get();
+
+      if (ref == nullptr)
+        return nullptr;
 
       return &std::get<Buffer>(ref->resource_data);
     } else {
