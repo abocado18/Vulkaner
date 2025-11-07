@@ -374,25 +374,23 @@ public:
                          TransistionData transistion_data,
                          uint64_t resource_idx);
 
-  uint64_t insertResource(std::variant<std::weak_ptr<Resource>, Resource *> resource);
+  uint64_t insertResource(
+      std::variant<std::weak_ptr<Resource>, std::unique_ptr<Resource>>
+          resource);
 
+  ResourceHandle createImage(uint32_t width, uint32_t height,
+                             VkImageUsageFlags image_usage,
+                             VkFormat image_format, bool is_permanent = false);
 
-  uint64_t createImage(uint32_t width, uint32_t height,
-                                VkImageUsageFlags image_usage,
-                                VkFormat image_format);
-
-
-
-  uint64_t loadImage(const std::string &path, VkFormat image_format,
-                     VkImageUsageFlags image_usage);
+  ResourceHandle loadImage(const std::string &path, VkFormat image_format,
+                           VkImageUsageFlags image_usage);
 
   uint64_t bindSampledImage(uint64_t resource_idx);
 
-  void destroyResource(uint64_t idx);
-
-  // Create buffer and caches in hashmap, returns resource index
+  // Create buffer and caches in hashmap, returns resource handle
   template <typename T>
-  uint64_t createBuffer(uint32_t size, BufferUsages buffer_usage, bool is_permanent = false) {
+  ResourceHandle createBuffer(uint32_t size, BufferUsages buffer_usage,
+                              bool is_permanent = false) {
     Buffer buffer;
 
     {
@@ -401,7 +399,7 @@ public:
         std::cerr << "Buffer of Type " << typeid(T).name()
                   << " already exists\n";
 
-        return UINT64_MAX;
+        return {UINT64_MAX, nullptr};
       }
     }
 
@@ -432,99 +430,51 @@ public:
     buffer.address = vkGetBufferDeviceAddressKHR(device, &address_info);
     buffer.offset = 0;
 
-    Resource r(device, allocator);
-
-    r.resource_data = buffer;
-    auto &buf = std::get<Buffer>(r.resource_data);
-
-    buf.current_buffer_usage = BufferUsages::BUFFER_USAGE_UNDEFINED;
-    buf.size = sizeof(T) * size;
-
+    buffer.current_buffer_usage = BufferUsages::BUFFER_USAGE_UNDEFINED;
+    buffer.size = sizeof(T) * size;
 
     uint64_t resource_idx;
 
-    if(is_permanent)
-    {
-      std::unique_ptr<Resource> unique_r = std::make_unique<Resource>(r);
+    if (is_permanent) {
 
-      resource_idx = insertResource(unique_r);
+      std::unique_ptr<Resource> unique_r =
+          std::make_unique<Resource>(device, allocator);
+
+      unique_r->resource_data = buffer;
+
+      resource_idx = insertResource(std::move(unique_r));
+
+      buffers_per_type[typeid(T)] = resource_idx;
+
+      return {resource_idx, unique_r.get()};
+
+    } else {
+
+      std::shared_ptr<Resource> shared_r =
+          std::make_shared<Resource>(device, allocator);
+
+      shared_r->resource_data = buffer;
+
+      std::weak_ptr<Resource> weak_r = shared_r;
+
+      resource_idx = insertResource(weak_r);
+
+      buffers_per_type[typeid(T)] = resource_idx;
+
+      return {resource_idx, shared_r};
     }
-    else {
-      
-    }
-
-    uint64_t resource_idx = insertResource(&r);
-
-    buffers_per_type[typeid(T)] = resource_idx;
-
-    return resource_idx;
   }
 
-  // Create buffer and caches in hashmap, returns resource index
-  template <typename T>
-  uint64_t createPermanentBuffer(uint32_t size, BufferUsages buffer_usage) {
-    Buffer buffer;
-
-    {
-      if (buffers_per_type.find(std::type_index(typeid(T))) !=
-          buffers_per_type.end()) {
-        std::cerr << "Buffer of Type " << typeid(T).name()
-                  << " already exists\n";
-
-        return UINT64_MAX;
-      }
-    }
-
-    VkBufferCreateInfo buffer_create_info = {};
-    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_create_info.queueFamilyIndexCount = 1;
-    buffer_create_info.pQueueFamilyIndices = &transfer_queue_index;
-    buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    buffer_create_info.size = sizeof(T) * size;
-    buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
-                               getBufferUsageFlags(buffer_usage);
-
-    VmaAllocationCreateInfo alloc_create_info = {};
-    alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    alloc_create_info.priority = 1.0f;
-    assert(buffer_create_info.size > 0);
-
-    VK_ERROR(vmaCreateBuffer(allocator, &buffer_create_info, &alloc_create_info,
-                             &buffer.buffer, &buffer.allocation,
-                             &buffer.allocation_info));
-
-    VkBufferDeviceAddressInfoKHR address_info = {};
-    address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
-    address_info.buffer = buffer.buffer;
-
-    buffer.address = vkGetBufferDeviceAddressKHR(device, &address_info);
-    buffer.offset = 0;
-
-    Resource r(device, allocator);
-
-    r.resource_data = buffer;
-    auto &buf = std::get<Buffer>(r.resource_data);
-
-    buf.current_buffer_usage = BufferUsages::BUFFER_USAGE_UNDEFINED;
-    buf.size = sizeof(T) * size;
-
-    uint64_t resource_idx = insertPermanentResource(r);
-
-    buffers_per_type[typeid(T)] = resource_idx;
-
-    return resource_idx;
-  }
-
-  ResourceHandle getResource(uint64_t idx) const {
+  Resource *getResource(uint64_t idx) const {
 
     const auto &r = resources.at(idx);
 
     if (std::holds_alternative<std::weak_ptr<Resource>>(r)) {
-      return {idx, std::get<std::weak_ptr<Resource>>(r).lock()};
+
+      return std::get<std::weak_ptr<Resource>>(r).lock().get();
+
     } else {
-      return {idx, std::get<std::unique_ptr<Resource>>(r).get()};
+      return std::get<std::unique_ptr<Resource>>(r).get();
     }
   };
 
@@ -591,16 +541,22 @@ public:
     return element_index;
   }
 
-  template <typename T> ResourceHandle getBufferPerType() {
+  template <typename T> Buffer *getBufferPerType() {
+
     uint64_t idx = buffers_per_type.at(typeid(T));
 
     auto &r = resources.at(idx);
 
     if (std::holds_alternative<std::weak_ptr<Resource>>(r)) {
-      return {idx, std::get<std::weak_ptr<Resource>>(r).lock()};
+
+      auto *ref = std::get<std::weak_ptr<Resource>>(r).lock().get();
+
+      return &std::get<Buffer>(ref->resource_data);
     } else {
 
-      return {idx, std::get<std::unique_ptr<Resource>>(r).get()};
+      auto *ref = std::get<std::unique_ptr<Resource>>(r).get();
+
+      return &std::get<Buffer>(ref->resource_data);
     }
   }
 

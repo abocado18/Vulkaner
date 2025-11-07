@@ -10,6 +10,7 @@
 #include <cassert>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -437,9 +438,9 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
   {
     // Create necessary buffers for rendering
     resource_handler->createBuffer<vertex::Vertex>(
-        5'000'000, resource_handler::BUFFER_USAGE_VERTEX_BUFFER);
+        5'000'000, resource_handler::BUFFER_USAGE_VERTEX_BUFFER, true);
     resource_handler->createBuffer<vertex::Index>(
-        5'000'000, resource_handler::BUFFER_USAGE_INDEX_BUFFER);
+        5'000'000, resource_handler::BUFFER_USAGE_INDEX_BUFFER, true);
   }
 
   {
@@ -453,8 +454,8 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
                                 VK_FORMAT_R8G8B8A8_UNORM,
                                 VK_IMAGE_USAGE_SAMPLED_BIT);
 
-    uint32_t key = resource_handler->createBuffer<Vector3>(
-        500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER);
+    auto key = resource_handler->createBuffer<Vector3>(
+        500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER, true);
 
     Vector3 a(0.0f, 1.0f, 1.0f);
 
@@ -568,12 +569,15 @@ void render::RenderContext::render() {
 
     for (auto &t : transfer_data) {
 
-      const auto &target = resource_handler->getResource(t.resource_idx);
+      const auto *target = resource_handler->getResource(t.resource_idx);
+
+      if (target == nullptr)
+        continue;
 
       if (std::holds_alternative<resource_handler::Image>(
-              target.resource_data)) {
+              target->resource_data)) {
 
-        auto &image = std::get<resource_handler::Image>(target.resource_data);
+        auto &image = std::get<resource_handler::Image>(target->resource_data);
 
         VkBufferImageCopy2KHR region = {};
         region.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2_KHR;
@@ -630,7 +634,8 @@ void render::RenderContext::render() {
 
       } else {
 
-        auto &buffer = std::get<resource_handler::Buffer>(target.resource_data);
+        auto &buffer =
+            std::get<resource_handler::Buffer>(target->resource_data);
 
         auto &staging_buffer = resource_handler->getStagingBuffer();
 
@@ -763,22 +768,22 @@ void render::RenderContext::render() {
     vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    auto &b = resource_handler->getBufferPerType<vertex::Vertex>();
-    auto &a = resource_handler->getBufferPerType<vertex::Index>();
+    auto *b = resource_handler->getBufferPerType<vertex::Vertex>();
+    auto *a = resource_handler->getBufferPerType<vertex::Index>();
 
     vkCmdPushConstants(graphics_command_buffer,
                        pipeline_manager->getPipelineByName("triangle").layout,
-                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b.address),
-                       &b.address);
+                       VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(b->address),
+                       &b->address);
 
     vkCmdPushConstants(graphics_command_buffer,
                        pipeline_manager->getPipelineByName("triangle").layout,
-                       VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(b.address),
-                       sizeof(a.address), &a.address);
+                       VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(b->address),
+                       sizeof(a->address), &a->address);
 
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &b.buffer, &offset);
-    vkCmdBindIndexBuffer(graphics_command_buffer, a.buffer, 0,
+    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &b->buffer, &offset);
+    vkCmdBindIndexBuffer(graphics_command_buffer, a->buffer, 0,
                          VK_INDEX_TYPE_UINT32);
 
     // vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
@@ -970,7 +975,8 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
 
   for (size_t i = 0; i < swapchain_image_count; i++) {
 
-    resource_handler::Resource resource(device, vma_allocator);
+    std::unique_ptr<resource_handler::Resource> resource =
+        std::make_unique<resource_handler::Resource>(device, vma_allocator);
 
     resource_handler::Image image = {};
 
@@ -982,10 +988,10 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
     image.range.layerCount = 1;
     image.range.levelCount = 1;
 
-    resource.resource_data = image;
+    resource->resource_data = image;
 
     swapchain.resource_image_indices[i] =
-        resource_handler->insertResource(resource);
+        resource_handler->insertResource(std::move(resource));
   }
 
   if (has_old_swapchain) {

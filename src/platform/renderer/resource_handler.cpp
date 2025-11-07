@@ -2,6 +2,7 @@
 #include "vulkan_macros.h"
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
@@ -122,22 +123,12 @@ resource_handler::ResourceHandler::~ResourceHandler() {
   vmaDestroyBuffer(allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
 
-uint64_t resource_handler::ResourceHandler::insertTransientResource(
-    resource_handler::Resource &resource) {
+uint64_t resource_handler::ResourceHandler::insertResource(
+    std::variant<std::weak_ptr<Resource>, std::unique_ptr<Resource>> resource) {
   static uint64_t next_id = 0;
   uint64_t id = next_id++;
 
-  this->transient_resources.insert_or_assign(id, resource);
-
-  return id;
-}
-
-uint64_t resource_handler::ResourceHandler::insertPermanentResource(
-    resource_handler::Resource &resource) {
-  static uint64_t next_id = 0;
-  uint64_t id = next_id++;
-
-  this->permanent_resources.insert_or_assign(id, resource);
+  this->resources.insert_or_assign(id, std::move(resource));
 
   return id;
 }
@@ -146,17 +137,20 @@ void resource_handler::ResourceHandler::updateTransistion(
     VkCommandBuffer command_buffer, TransistionData transistion_data,
     uint64_t resource_idx) {
 
-  auto it = resources.find(resource_idx);
+  auto it = this->resources.find(resource_idx);
 
   if (it == resources.end())
     return;
 
-  Resource &resource = it->second;
+  Resource *resource =
+      std::holds_alternative<std::weak_ptr<Resource>>(it->second)
+          ? std::get<std::weak_ptr<Resource>>(it->second).lock().get()
+          : std::get<std::unique_ptr<Resource>>(it->second).get();
 
-  if (std::holds_alternative<Image>(resource.resource_data)) {
+  if (std::holds_alternative<Image>(resource->resource_data)) {
     // Replace later with resource transistion manager update
 
-    auto &image = std::get<Image>(resource.resource_data);
+    auto &image = std::get<Image>(resource->resource_data);
 
     VkImageMemoryBarrier2KHR memory_barrier = {};
     memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
@@ -188,7 +182,7 @@ void resource_handler::ResourceHandler::updateTransistion(
 
   } else {
 
-    auto buffer = std::get<Buffer>(resource.resource_data);
+    auto &buffer = std::get<Buffer>(resource->resource_data);
 
     // To do: Add Transisition Logic for Buffers
     VkBufferMemoryBarrier2KHR memory_barrier = {};
@@ -217,7 +211,7 @@ void resource_handler::ResourceHandler::updateTransistion(
   }
 }
 
-uint64_t
+resource_handler::ResourceHandle
 resource_handler::ResourceHandler::loadImage(const std::string &path,
                                              VkFormat image_format,
                                              VkImageUsageFlags image_usage) {
@@ -230,10 +224,10 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
 
   if (!pixels) {
     std::cerr << "No file found\n";
-    return UINT64_MAX;
+    return {UINT64_MAX, nullptr};
   }
 
-  uint64_t resource_index =
+  ResourceHandle handle =
       this->createImage(width, height, image_usage, image_format);
 
   {
@@ -246,7 +240,7 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
     transfer_data.size = width * height * 4;
 
     transfer_data.target_offset = 0;
-    transfer_data.resource_idx = resource_index;
+    transfer_data.resource_idx = handle.idx;
   }
 
   {
@@ -255,9 +249,9 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
 
   this->transfers.push_back(transfer_data);
 
-  bindSampledImage(resource_index);
+  bindSampledImage(handle.idx);
 
-  return resource_index;
+  return handle;
 }
 
 void resource_handler::ResourceHandler::clearStagingTransferData() {
@@ -278,13 +272,15 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
     return UINT64_MAX;
   }
 
-  Resource &r = it->second;
+  Resource *r = std::holds_alternative<std::weak_ptr<Resource>>(it->second)
+                    ? std::get<std::weak_ptr<Resource>>(it->second).lock().get()
+                    : std::get<std::unique_ptr<Resource>>(it->second).get();
 
-  if (std::holds_alternative<Image>(r.resource_data) == false) {
+  if (std::holds_alternative<Image>(r->resource_data) == false) {
     return UINT64_MAX;
   }
 
-  auto &image = std::get<Image>(r.resource_data);
+  auto &image = std::get<Image>(r->resource_data);
 
   if (image.sampled_image_binding_slot != UINT64_MAX) {
     // Already bound
@@ -315,10 +311,9 @@ resource_handler::ResourceHandler::bindSampledImage(uint64_t resource_index) {
   return binding_slot;
 }
 
-uint64_t
-resource_handler::ResourceHandler::createImage(uint32_t width, uint32_t height,
-                                               VkImageUsageFlags image_usage,
-                                               VkFormat image_format) {
+resource_handler::ResourceHandle resource_handler::ResourceHandler::createImage(
+    uint32_t width, uint32_t height, VkImageUsageFlags image_usage,
+    VkFormat image_format, bool is_permanent) {
 
   uint64_t resource_index = UINT64_MAX;
 
@@ -388,40 +383,27 @@ resource_handler::ResourceHandler::createImage(uint32_t width, uint32_t height,
                              &new_image.sampler));
   }
 
-  Resource new_resource(device, allocator);
+  if (is_permanent) {
+    std::unique_ptr<Resource> unique_r =
+        std::make_unique<Resource>(device, allocator);
 
-  new_resource.resource_data = new_image;
+    unique_r->resource_data = new_image;
 
-  resource_index = insertResource(new_resource);
+    resource_index = insertResource(std::move(std::move(unique_r)));
 
-  return resource_index;
-}
+    return {resource_index, unique_r.get()};
 
-void resource_handler::ResourceHandler::destroyResource(uint64_t idx) {
-  auto it = resources.find(idx);
+  } else {
 
-  if (it == resources.end()) {
-    return;
-  }
+    std::shared_ptr<Resource> shared_r =
+        std::make_shared<Resource>(device, allocator);
 
-  auto &r = it->second;
+    shared_r->resource_data = new_image;
 
-  if (std::holds_alternative<Image>(r.resource_data)) {
+    std::weak_ptr<Resource> weak_r = shared_r;
 
-    auto &image = std::get<Image>(r.resource_data);
+    resource_index = insertResource(weak_r);
 
-    vkDestroySampler(device, image.sampler, nullptr);
-
-    vkDestroyImageView(device, image.view, nullptr);
-
-    vmaDestroyImage(allocator, image.image, image.allocation);
-
-    resources.erase(idx);
-  } else if (std::holds_alternative<Buffer>(r.resource_data)) {
-
-    auto &buffer = std::get<Buffer>(r.resource_data);
-
-    vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
-    resources.erase(idx);
+    return {resource_index, shared_r};
   }
 }
