@@ -385,7 +385,7 @@ resource_handler::ResourceHandle resource_handler::ResourceHandler::createImage(
 
   if (is_permanent) {
     std::unique_ptr<Resource> unique_r =
-        std::make_unique<Resource>(device, allocator);
+        std::make_unique<Resource>(device, allocator, true);
 
     unique_r->resource_data = new_image;
 
@@ -396,7 +396,7 @@ resource_handler::ResourceHandle resource_handler::ResourceHandler::createImage(
   } else {
 
     std::shared_ptr<Resource> shared_r =
-        std::make_shared<Resource>(device, allocator);
+        std::make_shared<Resource>(device, allocator, true);
 
     shared_r->resource_data = new_image;
 

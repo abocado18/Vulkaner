@@ -71,6 +71,36 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     }
   }
 
+  if (p.attributes.find("TEX_COORD0") != p.attributes.end()) {
+    int accessorIndex = p.attributes.at("TEX_COORD0");
+    const tinygltf::Accessor &accessor = model.accessors[accessorIndex];
+    const tinygltf::BufferView &bufferView =
+        model.bufferViews[accessor.bufferView];
+    const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+
+    // Pointer to the vertex data
+    const float *vertices = reinterpret_cast<const float *>(
+        &buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+
+    size_t vertexCount = accessor.count;
+    std::cout << "Vertex count: " << vertexCount << std::endl;
+
+    vertex_data.resize(vertexCount);
+
+    size_t stride = accessor.ByteStride(bufferView);
+    if (stride == 0)
+      stride = 2 * sizeof(float);
+
+    for (size_t i = 0; i < vertexCount; i++) {
+      const float *vertexPtr = reinterpret_cast<const float *>(
+          &buffer
+               .data[bufferView.byteOffset + accessor.byteOffset + i * stride]);
+
+      vertex_data[i].tex_coords =
+          Vector2(vertexPtr[0], vertexPtr[1]);
+    }
+  }
+
   if (p.indices >= 0) {
     const tinygltf::Accessor &indexAccessor = model.accessors[p.indices];
     const tinygltf::BufferView &indexBufferView =

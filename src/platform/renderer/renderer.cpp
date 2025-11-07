@@ -450,12 +450,12 @@ render::RenderContext::RenderContext(uint32_t width, uint32_t height,
 
     pipeline_manager->createRenderPipeline(pipeline_data, "triangle");
 
-    resource_handler->loadImage(SHADER_PATH "/zelda.jpg",
-                                VK_FORMAT_R8G8B8A8_UNORM,
-                                VK_IMAGE_USAGE_SAMPLED_BIT);
+    auto bbb = resource_handler->loadImage(SHADER_PATH "/zelda.jpg",
+                                                  VK_FORMAT_R8G8B8A8_UNORM,
+                                                  VK_IMAGE_USAGE_SAMPLED_BIT);
 
     auto key = resource_handler->createBuffer<Vector3>(
-        500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER, true);
+        500, resource_handler::BUFFER_USAGE_STORAGE_BUFFER, false);
 
     Vector3 a(0.0f, 1.0f, 1.0f);
 
@@ -786,8 +786,8 @@ void render::RenderContext::render() {
     vkCmdBindIndexBuffer(graphics_command_buffer, a->buffer, 0,
                          VK_INDEX_TYPE_UINT32);
 
-    // vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
-    vkCmdDrawIndexed(graphics_command_buffer, 2904, 1, 0, 0, 0);
+     vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
+    //vkCmdDrawIndexed(graphics_command_buffer, 2904, 1, 0, 0, 0);
 
     vkCmdEndRenderingKHR(graphics_command_buffer);
   }
@@ -976,7 +976,7 @@ void render::RenderContext::createSwapchain(bool has_old_swapchain,
   for (size_t i = 0; i < swapchain_image_count; i++) {
 
     std::unique_ptr<resource_handler::Resource> resource =
-        std::make_unique<resource_handler::Resource>(device, vma_allocator);
+        std::make_unique<resource_handler::Resource>(device, vma_allocator, false);
 
     resource_handler::Image image = {};
 

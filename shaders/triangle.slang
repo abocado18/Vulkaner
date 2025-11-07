@@ -66,24 +66,23 @@ VSOut vertexMain(Vertex in, uint id : SV_VertexID)
 {
     // Hardcoded triangle positions in clip space
 
-    float4x4 view = float4x4(
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, -3, 1   // move camera back along +Z (looking toward -Z)
-    );
-    
-    float4x4 proj = float4x4(
-        1.3618, 0,      0,       0,
-        0,      -2.4142, 0,       0,
-        0,      0,     -1.001,  -1,
-        0,      0,     -0.1001,  0
-    );
-    
+      float2 positions[3] = {
+        float2(0.0f,  0.5f),   // top
+        float2(0.5f, -0.5f),   // right
+        float2(-0.5f, -0.5f)   // left
+    };
 
     VSOut output;
-    output.position = mul(mul(float4(in.position, 1.0), view), proj);
-    output.uv = in.tex_coords;
+    output.position = float4(positions[id], 0.0f, 1.0f);
+
+    // Assign UVs same as positions (for testing)
+    float2 uvs[3] = {
+        float2(0.5f, 1.0f),
+        float2(1.0f, 0.0f),
+        float2(0.0f, 0.0f)
+    };
+    output.uv = uvs[id];
+
     return output;
 }
 
@@ -94,5 +93,8 @@ VSOut vertexMain(Vertex in, uint id : SV_VertexID)
 float4 pixelMain(VSOut input) : SV_Target
 {
 
-   return float4(1.0, 0.0, 0.0, 1.0);
+
+    float3 a = sampled_textures[0].Sample(input.uv).rgb;
+
+   return float4(a, 1.0);
 }

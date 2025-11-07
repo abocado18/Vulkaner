@@ -318,10 +318,16 @@ struct Descriptor {
 class Resource {
 
 public:
-  Resource(VkDevice &device, VmaAllocator &allocator)
-      : device(&device), allocator(&allocator) {}
+  Resource(VkDevice &device, VmaAllocator &allocator,
+           bool destroy_after_destruction)
+      : device(&device), allocator(&allocator),
+        destroy_after_destruction(destroy_after_destruction) {}
 
   ~Resource() {
+
+    if (!destroy_after_destruction)
+      return;
+
     if (std::holds_alternative<Image>(resource_data)) {
 
       auto &image = std::get<Image>(resource_data);
@@ -345,6 +351,8 @@ public:
 private:
   VkDevice *device;
   VmaAllocator *allocator;
+
+  bool destroy_after_destruction;
 };
 
 struct StagingTransferData {
@@ -438,7 +446,7 @@ public:
     if (is_permanent) {
 
       std::unique_ptr<Resource> unique_r =
-          std::make_unique<Resource>(device, allocator);
+          std::make_unique<Resource>(device, allocator, true);
 
       unique_r->resource_data = buffer;
 
@@ -451,7 +459,7 @@ public:
     } else {
 
       std::shared_ptr<Resource> shared_r =
-          std::make_shared<Resource>(device, allocator);
+          std::make_shared<Resource>(device, allocator, true);
 
       shared_r->resource_data = buffer;
 
