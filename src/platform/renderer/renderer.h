@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
 namespace render {
 
@@ -42,8 +43,17 @@ public:
 
   // Writes to buffer and returns giveon or new offset
   template <typename T>
-  uint32_t writeToBuffer(T *data, uint32_t number_of_instances = 1, uint32_t offset = UINT32_MAX) {
+  uint32_t writeToBuffer(T *data, uint32_t number_of_instances = 1,
+                         uint32_t offset = UINT32_MAX) {
     return resource_handler->writeToBuffer(data, number_of_instances, offset);
+  }
+
+  resource_handler::ResourceHandle createImage(uint32_t width, uint32_t height,
+                                               VkImageUsageFlags usage_flags,
+                                               VkFormat image_format) {
+
+    return resource_handler->createImage(width, height, usage_flags,
+                                         image_format);
   }
 
   bool windowShouldClose() const;

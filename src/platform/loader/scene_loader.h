@@ -1,13 +1,19 @@
 #pragma once
 
 #include "platform/renderer/gpu_structs.h"
+#include "platform/renderer/resource_handler.h"
 #include "platform/renderer/vertex.h"
 #include "tinygltf/tiny_gltf.h"
 
 #include "game/ecs/vox_ecs.h"
-#include "platform/renderer/renderer.h"
 #include "platform/renderer/material.h"
+#include "platform/renderer/renderer.h"
+#include <cstdint>
+#include <unordered_map>
 #include <vector>
+#include <vulkan/vulkan_core.h>
+
+#include "game/required_components/assets.h"
 
 namespace gltf_load {
 
@@ -36,115 +42,56 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     printf("Failed to parse glTF: %s\n", path.c_str());
   }
 
-  
+#pragma region Load Textures
 
-  auto &p = model.meshes[0].primitives[0];
+  std::unordered_map<int32_t, std::string> image_usage = {};
 
-  
+  for (auto &mat : model.materials) {
+    if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0)
+      image_usage[mat.pbrMetallicRoughness.baseColorTexture.index] = "albedo";
 
-  std::vector<vertex::Vertex> vertex_data = {};
-  std::vector<vertex::Index> indices = {};
+    if (mat.normalTexture.index >= 0)
+      image_usage[mat.normalTexture.index] = "normal";
 
-  if (p.attributes.find("POSITION") != p.attributes.end()) {
-    int accessorIndex = p.attributes.at("POSITION");
-    const tinygltf::Accessor &accessor = model.accessors[accessorIndex];
-    const tinygltf::BufferView &bufferView =
-        model.bufferViews[accessor.bufferView];
-    const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+    if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0)
+      image_usage[mat.pbrMetallicRoughness.metallicRoughnessTexture.index] =
+          "metallicRoughness";
 
+    if (mat.occlusionTexture.index >= 0)
+      image_usage[mat.occlusionTexture.index] = "occlusion";
 
-
-    // Pointer to the vertex data
-    const float *vertices = reinterpret_cast<const float *>(
-        &buffer.data[bufferView.byteOffset + accessor.byteOffset]);
-
-    size_t vertexCount = accessor.count;
-    std::cout << "Vertex count: " << vertexCount << std::endl;
-
-    vertex_data.resize(vertexCount);
-
-    size_t stride = accessor.ByteStride(bufferView);
-    if (stride == 0)
-      stride = 3 * sizeof(float);
-
-    for (size_t i = 0; i < vertexCount; i++) {
-      const float *vertexPtr = reinterpret_cast<const float *>(
-          &buffer
-               .data[bufferView.byteOffset + accessor.byteOffset + i * stride]);
-
-      vertex_data[i].position =
-          Vector3(vertexPtr[0], vertexPtr[1], vertexPtr[2]);
-    }
+    if (mat.emissiveTexture.index >= 0)
+      image_usage[mat.emissiveTexture.index] = "emissive";
   }
 
-  if (p.attributes.find("TEX_COORD0") != p.attributes.end()) {
-    int accessorIndex = p.attributes.at("TEX_COORD0");
-    const tinygltf::Accessor &accessor = model.accessors[accessorIndex];
-    const tinygltf::BufferView &bufferView =
-        model.bufferViews[accessor.bufferView];
-    const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+  for (auto &t : model.textures) {
+    const auto &img = model.images[t.source];
 
-    // Pointer to the vertex data
-    const float *vertices = reinterpret_cast<const float *>(
-        &buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+    const uint8_t *pixels = reinterpret_cast<const uint8_t *>(img.image.data());
 
-    size_t vertexCount = accessor.count;
-    std::cout << "Vertex count: " << vertexCount << std::endl;
+    const uint32_t width = static_cast<uint32_t>(img.width);
+    const uint32_t height = static_cast<uint32_t>(img.height);
 
-    vertex_data.resize(vertexCount);
+    VkFormat image_format;
 
-    size_t stride = accessor.ByteStride(bufferView);
-    if (stride == 0)
-      stride = 2 * sizeof(float);
-
-    for (size_t i = 0; i < vertexCount; i++) {
-      const float *vertexPtr = reinterpret_cast<const float *>(
-          &buffer
-               .data[bufferView.byteOffset + accessor.byteOffset + i * stride]);
-
-      vertex_data[i].tex_coords =
-          Vector2(vertexPtr[0], vertexPtr[1]);
-    }
-  }
-
-  if (p.indices >= 0) {
-    const tinygltf::Accessor &indexAccessor = model.accessors[p.indices];
-    const tinygltf::BufferView &indexBufferView =
-        model.bufferViews[indexAccessor.bufferView];
-    const tinygltf::Buffer &indexBuffer = model.buffers[indexBufferView.buffer];
-
-    indices.resize(indexAccessor.count);
-
-    if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-      const uint16_t *buf = reinterpret_cast<const uint16_t *>(
-          &indexBuffer
-               .data[indexBufferView.byteOffset + indexAccessor.byteOffset]);
-      for (size_t i = 0; i < indexAccessor.count; i++) {
-        indices[i].value = static_cast<uint32_t>(buf[i]);
-      }
-    } else if (indexAccessor.componentType ==
-               TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-      const uint32_t *buf = reinterpret_cast<const uint32_t *>(
-          &indexBuffer
-               .data[indexBufferView.byteOffset + indexAccessor.byteOffset]);
-      for (size_t i = 0; i < indexAccessor.count; i++) {
-        indices[i].value = static_cast<uint32_t>(buf[i]);
-      }
+    if (image_usage.at(t.source) == "albedo" ||
+        image_usage.at(t.source) == "emissive") {
+      image_format = VK_FORMAT_R8G8B8A8_SRGB;
     } else {
-      throw std::runtime_error("Unsupported index type");
+      image_format = VK_FORMAT_R8G8B8A8_UNORM;
     }
+
+    resource_handler::ResourceHandle handle = render_ctx.createImage(
+        width, height, VK_IMAGE_USAGE_SAMPLED_BIT, image_format);
+
+    
   }
 
-
-  std::cout << "Number of indices: " << indices.size() << "\n";
-
-  auto offset = render_ctx.writeToBuffer<vertex::Vertex>(vertex_data.data(), vertex_data.size());
-  auto i_offset = render_ctx.writeToBuffer<vertex::Index>(indices.data(), indices.size());
-
-
-  assert(offset == 0);
-  assert(i_offset == 0);
-
+#pragma endregion
 }
 
 } // namespace gltf_load
+
+
+
+

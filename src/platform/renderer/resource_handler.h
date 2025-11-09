@@ -373,7 +373,7 @@ struct ResourceHandle {
 
   const uint64_t idx;
 
-  std::variant<std::shared_ptr<Resource>, Resource *> r;
+  const std::variant<std::shared_ptr<Resource>, Resource *> r;
 };
 
 class ResourceHandler {

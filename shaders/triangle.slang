@@ -67,9 +67,9 @@ VSOut vertexMain(Vertex in, uint id : SV_VertexID)
     // Hardcoded triangle positions in clip space
 
       float2 positions[3] = {
-        float2(0.0f,  0.5f),   // top
-        float2(0.5f, -0.5f),   // right
-        float2(-0.5f, -0.5f)   // left
+        float2(0.0f,  -0.5f),   // top
+        float2(0.5f, 0.5f),   // right
+        float2(-0.5f, 0.5f)   // left
     };
 
     VSOut output;
@@ -96,5 +96,5 @@ float4 pixelMain(VSOut input) : SV_Target
 
     float3 a = sampled_textures[0].Sample(input.uv).rgb;
 
-   return float4(a, 1.0);
+   return float4(1.0, 0.0, 0.0, 1.0);
 }
