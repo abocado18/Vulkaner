@@ -40,4 +40,6 @@ void game::Game::tick() {
   world.runSchedule(PreUpdate);
   world.runSchedule(Update);
   world.runSchedule(PostUpdate);
+
+  world.updateWorldTick();
 }

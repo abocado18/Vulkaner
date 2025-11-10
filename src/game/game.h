@@ -2,6 +2,7 @@
 
 #include "ecs/vox_ecs.h"
 
+#include "game/plugin.h"
 #include "platform/renderer/renderer.h"
 
 #include "platform/math/math.h"
@@ -11,43 +12,40 @@
 
 namespace game {
 
-
-
-struct Time
-{
+struct Time {
   float delta_time;
   float total_time;
   uint64_t total_ticks;
 };
-
 
 class Game {
 public:
   Game(render::RenderContext &render_ctx);
   ~Game();
 
-
   void tick();
 
   void runStartup();
 
+  void addPlugin(plugin::IPlugin &p)
+  {
+    p.build(*this);
+  }
 
 private:
   vecs::Ecs world;
 
   Time time_data = {};
-  
 
   std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start;
 
   render::RenderContext &render_ctx;
-
 
   vecs::Schedule Startup = {};
 
   vecs::Schedule PreUpdate = {};
   vecs::Schedule Update = {};
   vecs::Schedule PostUpdate = {};
-
 };
+
 } // namespace game

@@ -3,6 +3,7 @@
 #include "thread_pool.h"
 #include <cassert>
 #include <cinttypes>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -28,6 +29,13 @@ struct Schedule {
   std::unordered_set<uint32_t> systems;
 };
 
+template <typename T> struct Added {
+  using type = T;
+};
+
+template <typename T> struct isMarkedAdded : std::false_type {};
+template <typename T> struct isMarkedAdded<Added<T>> : std::true_type {};
+
 template <typename T> struct Write {
   using type = T;
 };
@@ -45,6 +53,14 @@ template <typename T> struct unwrap_component<Read<T>> {
 };
 
 template <typename T> struct unwrap_component<Write<T>> {
+  using type = T;
+};
+
+template <typename T> struct unwrap_component<Added<Write<T>>> {
+  using type = T;
+};
+
+template <typename T> struct unwrap_component<Added<Read<T>>> {
   using type = T;
 };
 
@@ -69,6 +85,12 @@ template <typename T> struct is_read_or_write : std::false_type {};
 template <typename T> struct is_read_or_write<Read<T>> : std::true_type {};
 
 template <typename T> struct is_read_or_write<Write<T>> : std::true_type {};
+
+template <typename T>
+struct is_read_or_write<Added<Read<T>>> : std::true_type {};
+
+template <typename T>
+struct is_read_or_write<Added<Write<T>>> : std::true_type {};
 
 template <typename T> struct is_read : std::false_type {};
 
@@ -128,12 +150,6 @@ template <typename T> struct isResource<Res<T>> : std::true_type {};
 
 template <typename T> struct isResource<ResMut<T>> : std::true_type {};
 
-/// @brief Create a tuple with only types that passes a condition
-/// @tparam ...Ts
-template <template <typename> class Cond, typename... Ts>
-using filtered_tuple = decltype(std::tuple_cat(
-    std::conditional_t<Cond<Ts>::value, std::tuple<Ts>, std::tuple<>>{}...));
-
 struct SystemWrapper {
   SystemWrapper()
       : callback({}), c_read(0), c_write(0), r_read(0), r_write(0) {};
@@ -166,10 +182,16 @@ template <typename T> struct DenseEntry {
   Entity entity;
 };
 
+struct Tick {
+  uint32_t added;
+  uint32_t changed;
+};
+
 template <typename T> struct SparseSet : SparseSetBase {
 
   std::vector<DenseEntry<T>> dense;
   std::vector<uint32_t> sparse;
+  std::vector<Tick> tick;
 };
 
 using removeSparseSet = void (*)(SparseSetBase *, Entity);
@@ -187,9 +209,13 @@ template <typename T> removeSparseSet makeRemoveForSparseSet() {
 
     set->dense[component_index] = set->dense.back();
 
+    set->tick[component_index] = set->tick.back();
+
     set->sparse[last_entity] = component_index;
 
     set->dense.pop_back();
+
+    set->tick.pop_back();
 
     set->sparse[e] = NO_ENTITY;
   };
@@ -206,7 +232,7 @@ template <typename T> struct ResourceData : ResourceBase {
 class Ecs {
 public:
   Ecs()
-      : pool(thread_pool::ThreadPool()) {
+      : pool(thread_pool::ThreadPool()), current_world_tick(0) {
 
         };
 
@@ -279,15 +305,24 @@ public:
             &sparse_set.dense;
         static std::vector<uint32_t> *sparse = &sparse_set.sparse;
 
+        static std::vector<Tick> *tick = &sparse_set.tick;
+
         if constexpr (is_read<T>::value) {
           // Assumes check for Entity happened before
           return static_cast<const component_t<T> &>(
               (*dense)[(*sparse)[e]].component);
+
         } else {
+
+          (*tick)[(*sparse)[e]].changed = ecs->current_world_tick;
+
           return static_cast<component_t<T> &>(
               (*dense)[(*sparse)[e]].component);
         }
-      } else {
+
+      }
+
+      else {
 
         using Inner = typename unwrapResource<T>::type;
 
@@ -326,11 +361,20 @@ public:
     inline bool hasComponent(Entity e) {
       if constexpr (is_read_or_write<T>::value &&
                     !std::is_same_v<component_t<T>, component_t<smallest_T>>) {
+
         static SparseSet<component_t<T>> &sparse_set =
             ecs->getOrCreateSparseSet<component_t<T>>();
         static std::vector<uint32_t> *sparse = &sparse_set.sparse;
+        static std::vector<Tick> *tick = &sparse_set.tick;
+
+        if constexpr (isMarkedAdded<T>::value) {
+
+          return (e < (*sparse).size() && (*sparse)[e] != NO_ENTITY &&
+                  (*tick)[(*sparse)[e]].added == ecs->current_world_tick);
+        }
 
         return (e < (*sparse).size() && (*sparse)[e] != NO_ENTITY);
+
       } else {
         return true;
       }
@@ -363,6 +407,7 @@ public:
     SparseSet<T> &set = getOrCreateSparseSet<T>();
 
     set.dense.push_back({component, e});
+    set.tick.push_back({current_world_tick, current_world_tick});
 
     uint32_t dense_index = set.dense.size() - 1;
 
@@ -665,8 +710,12 @@ public:
     return &resource->data;
   }
 
+  void updateWorldTick() { current_world_tick++; }
+
 private:
   thread_pool::ThreadPool pool;
+
+  uint32_t current_world_tick = 0;
 
   template <typename T> resource_r<T> getResourceForLoop() {
     return getResource<typename unwrapResource<T>::type>();
@@ -726,6 +775,8 @@ private:
 
       if (!view.template hasAllComponents<smallest_T>(e))
         continue;
+
+      
 
       func(view, e, view.template getSystemArgument<Ts>(e)...);
     }
