@@ -64,6 +64,17 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
       image_usage[mat.emissiveTexture.index] = "emissive";
   }
 
+  auto *it = world.getResource<Assets<resource_handler::ResourceHandle>>();
+
+  if (it == nullptr) {
+
+    world.insertResource<Assets<resource_handler::ResourceHandle>>({});
+
+    it = world.getResource<Assets<resource_handler::ResourceHandle>>();
+  }
+
+  std::unordered_map<size_t, size_t> source_to_handle = {};
+
   for (auto &t : model.textures) {
     const auto &img = model.images[t.source];
 
@@ -84,14 +95,10 @@ static void loadScene(const std::string &path, vecs::Ecs &world,
     resource_handler::ResourceHandle handle = render_ctx.createImage(
         width, height, VK_IMAGE_USAGE_SAMPLED_BIT, image_format);
 
-    
+    source_to_handle[t.source] = it->addAsset(handle);
   }
 
 #pragma endregion
 }
 
 } // namespace gltf_load
-
-
-
-

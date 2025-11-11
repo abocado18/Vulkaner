@@ -19,6 +19,8 @@ namespace vecs {
 using Entity = uint32_t;
 constexpr Entity NO_ENTITY = UINT32_MAX;
 
+template <typename T> using Removed = std::vector<Entity>;
+
 class Ecs; // Forward Decl
 
 struct Schedule {
@@ -171,9 +173,12 @@ struct SystemWrapper {
 struct SparseSetBase {
   virtual ~SparseSetBase() = default;
 
-  void (*remove)(SparseSetBase *,
+  void (*remove)(Ecs *, SparseSetBase *,
                  Entity); // Gets created when creating a new sparseset ->
                           // caches Type at comp time for type erased removal
+
+  void (*clear_trackers)(
+      SparseSetBase *); // Clear Trackers, like removed Entities
 };
 
 template <typename T> struct DenseEntry {
@@ -192,32 +197,16 @@ template <typename T> struct SparseSet : SparseSetBase {
   std::vector<DenseEntry<T>> dense;
   std::vector<uint32_t> sparse;
   std::vector<Tick> tick;
+
+  Removed<T> removed;
 };
 
-using removeSparseSet = void (*)(SparseSetBase *, Entity);
-
-template <typename T> removeSparseSet makeRemoveForSparseSet() {
-  return [](SparseSetBase *base, Entity e) {
+using clearTrackers = void (*)(SparseSetBase *);
+template <typename T> clearTrackers makeClearTrackersForSparseSet() {
+  return [](SparseSetBase *base) {
     SparseSet<T> *set = static_cast<SparseSet<T> *>(base);
 
-    uint32_t component_index = set->sparse[e];
-
-    if (component_index == NO_ENTITY)
-      return;
-
-    Entity last_entity = set->dense.back().entity;
-
-    set->dense[component_index] = set->dense.back();
-
-    set->tick[component_index] = set->tick.back();
-
-    set->sparse[last_entity] = component_index;
-
-    set->dense.pop_back();
-
-    set->tick.pop_back();
-
-    set->sparse[e] = NO_ENTITY;
+    set->removed.clear();
   };
 }
 
@@ -443,7 +432,9 @@ public:
 
     entity_what_components[e].erase(comp_index);
 
-    set->remove(set, e);
+    set->remove(this, set, e);
+
+    insertResource<Removed<T>>(set->removed);
   }
 
   template <typename... Ts, typename Func> void forEach(Func &&func) {
@@ -682,7 +673,9 @@ public:
     for (size_t i = 0; i < entity_what_components[e].size(); i++) {
       SparseSetBase *set = sets[i];
 
-      set->remove(set, e);
+      set->remove(this, set, e);
+
+      
     }
 
     entity_what_components[e].clear();
@@ -710,7 +703,13 @@ public:
     return &resource->data;
   }
 
-  void updateWorldTick() { current_world_tick++; }
+  void update() {
+    current_world_tick++;
+
+    for (auto *s : sets) {
+      s->clear_trackers(s);
+    }
+  }
 
 private:
   thread_pool::ThreadPool pool;
@@ -776,8 +775,6 @@ private:
       if (!view.template hasAllComponents<smallest_T>(e))
         continue;
 
-      
-
       func(view, e, view.template getSystemArgument<Ts>(e)...);
     }
   }
@@ -791,6 +788,7 @@ private:
     if (sets[type_id] == nullptr) {
       sets[type_id] = new SparseSet<T>();
       sets[type_id]->remove = makeRemoveForSparseSet<T>();
+      sets[type_id]->clear_trackers = makeClearTrackersForSparseSet<T>();
     }
 
     return *static_cast<SparseSet<T> *>(sets[type_id]);
@@ -826,4 +824,36 @@ private:
   std::vector<std::unordered_set<uint32_t>>
       entity_what_components; // Caches what entity has which components
 };
+
+using removeSparseSet = void (*)(Ecs *, SparseSetBase *, Entity);
+
+template <typename T> removeSparseSet makeRemoveForSparseSet() {
+  return [](Ecs *world, SparseSetBase *base, Entity e) {
+    SparseSet<T> *set = static_cast<SparseSet<T> *>(base);
+
+    uint32_t component_index = set->sparse[e];
+
+    if (component_index == NO_ENTITY)
+      return;
+
+    Entity last_entity = set->dense.back().entity;
+
+    set->dense[component_index] = set->dense.back();
+
+    set->tick[component_index] = set->tick.back();
+
+    set->sparse[last_entity] = component_index;
+
+    set->dense.pop_back();
+
+    set->tick.pop_back();
+
+    set->sparse[e] = NO_ENTITY;
+
+    set->removed.push_back(e);
+
+    world->insertResource<Removed<T>>(set->removed);
+  };
+}
+
 } // namespace vecs

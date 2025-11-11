@@ -2,15 +2,24 @@
 
 #include "ecs/vox_ecs.h"
 
-#include "game/plugin.h"
+
 #include "platform/renderer/renderer.h"
 
 #include "platform/math/math.h"
 #include <bits/types/timer_t.h>
 
+#include "plugin.h"
+
 #include <chrono>
 
 namespace game {
+
+
+
+
+
+
+ 
 
 struct Time {
   float delta_time;
@@ -27,13 +36,15 @@ public:
 
   void runStartup();
 
-  void addPlugin(plugin::IPlugin &p)
+  void addPlugin(IPlugin &p)
   {
     p.build(*this);
   }
 
-private:
   vecs::Ecs world;
+
+private:
+  
 
   Time time_data = {};
 

@@ -371,9 +371,9 @@ struct StagingTransferData {
 struct ResourceHandle {
 
 
-  const uint64_t idx;
+  uint64_t idx;
 
-  const std::variant<std::shared_ptr<Resource>, Resource *> r;
+  std::variant<std::shared_ptr<Resource>, Resource *> r;
 };
 
 class ResourceHandler {

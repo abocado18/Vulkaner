@@ -1,15 +1,18 @@
 #pragma once
 
-// Forward Declaration
+
+
+
 namespace game {
-struct Game;
-};
+    class Game;
+}
 
-namespace plugin {
 
-struct IPlugin {
+
+
+
+
+  struct IPlugin {
 
   virtual void build(game::Game &game) = 0;
 };
-
-} // namespace plugin

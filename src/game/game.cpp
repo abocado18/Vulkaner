@@ -41,5 +41,5 @@ void game::Game::tick() {
   world.runSchedule(Update);
   world.runSchedule(PostUpdate);
 
-  world.updateWorldTick();
+  world.update();
 }
