@@ -10,7 +10,7 @@
 game::Game::Game(render::RenderContext &render_ctx)
     : render_ctx(render_ctx), world() {
 
-  SceneLoader loader;
+  SceneLoaderPlugin loader;
   addPlugin(loader);
 
   time_data.delta_time = 0.0f;
@@ -19,7 +19,9 @@ game::Game::Game(render::RenderContext &render_ctx)
 
   world.insertResource<Time>(time_data);
 
-  gltf_load::loadScene(ASSET_PATH "/monke.glb", world, render_ctx);
+  world.insertResource<render::RenderContext *>(&render_ctx);
+
+  
 }
 
 game::Game::~Game() {}
@@ -50,7 +52,6 @@ void game::Game::tick() {
 
   world.runSchedule(PostUpdate);
   world.executeCommands();
-
 
   world.update();
 }

@@ -234,6 +234,12 @@ struct ResourceBase {
 };
 
 template <typename T> struct ResourceData : ResourceBase {
+
+  ResourceData() = default;
+
+  explicit ResourceData(const T &d) : data(d) {}
+  explicit ResourceData(T &&d) : data(std::move(d)) {}
+
   T data;
 };
 
@@ -521,7 +527,7 @@ public:
     }
 
     if (!resources[id]) {
-      resources[id] = new ResourceData<T>();
+      resources[id] = new ResourceData<T>(data);
     }
 
     ResourceData<T> &ref = *static_cast<ResourceData<T> *>(resources[id]);
