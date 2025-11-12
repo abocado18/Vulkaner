@@ -5,8 +5,13 @@
 
 #include "platform/loader/scene_loader.h"
 
+#include "required_components/loader.h"
+
 game::Game::Game(render::RenderContext &render_ctx)
     : render_ctx(render_ctx), world() {
+
+  SceneLoader loader;
+  addPlugin(loader);
 
   time_data.delta_time = 0.0f;
   time_data.total_time = 0.0f;
@@ -38,8 +43,14 @@ void game::Game::tick() {
   world.insertResource<Time>(time_data);
 
   world.runSchedule(PreUpdate);
+  world.executeCommands();
+
   world.runSchedule(Update);
+  world.executeCommands();
+
   world.runSchedule(PostUpdate);
+  world.executeCommands();
+
 
   world.update();
 }

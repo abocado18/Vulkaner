@@ -152,6 +152,25 @@ template <typename T> struct isResource<Res<T>> : std::true_type {};
 
 template <typename T> struct isResource<ResMut<T>> : std::true_type {};
 
+class Commands {
+
+public:
+  template <typename F> void push(F &&f) {
+    commands.emplace_back(std::forward<F>(f));
+  }
+
+  void flush(Ecs *world) {
+    for (auto &cmd : commands) {
+      cmd(world);
+    }
+
+    commands.clear();
+  }
+
+private:
+  std::vector<std::function<void(Ecs *)>> commands = {};
+};
+
 struct SystemWrapper {
   SystemWrapper()
       : callback({}), c_read(0), c_write(0), r_read(0), r_write(0) {};
@@ -220,10 +239,10 @@ template <typename T> struct ResourceData : ResourceBase {
 
 class Ecs {
 public:
-  Ecs()
-      : pool(thread_pool::ThreadPool()), current_world_tick(0) {
+  Ecs() : pool(thread_pool::ThreadPool()), current_world_tick(0) {
 
-        };
+    insertResource<Commands>({});
+  };
 
   ~Ecs() {
 
@@ -280,6 +299,7 @@ public:
     Ecs *ecs;
 
     template <typename T> inline decltype(auto) getSystemArgument(Entity e) {
+
       static_assert(is_read_or_write<T>::value || isResource<T>::value,
                     "Must be a resource or component");
 
@@ -315,24 +335,20 @@ public:
 
         using Inner = typename unwrapResource<T>::type;
 
-        static uint32_t resource_id = ecs->getResourceId<Inner>();
-
-        if (resource_id >= ecs->resources.size())
-          ecs->resources.resize(resource_id + 1, nullptr);
-
-        ResourceData<Inner> *data =
-            static_cast<ResourceData<Inner> *>(ecs->resources[resource_id]);
+        Inner *data = ecs->getResource<Inner>();
 
         if (data == nullptr) {
-          std::cerr << "No Resource inserted\n";
-          std::abort();
+
+          ecs->insertResource<Inner>({});
+
+          data = ecs->getResource<Inner>();
         }
 
         if constexpr (isMutableResource<T>::value) {
-          return static_cast<Inner &>(data->data);
+          return static_cast<Inner &>(*data);
         } else {
 
-          return static_cast<const Inner &>(data->data);
+          return static_cast<const Inner &>(*data);
         }
       }
     }
@@ -466,6 +482,13 @@ public:
 
     size_t count = 0;
 
+    if (smallest_size == SIZE_MAX) {
+      // Only Resources
+
+      iterateResourceOnly<Ts...>(func);
+      return;
+    }
+
     (
         [&]() {
           if constexpr (is_read_or_write<Ts>::value) {
@@ -485,11 +508,19 @@ public:
     return e++;
   }
 
+  void executeCommands() {
+    Commands *cmd = getResource<Commands>();
+    cmd->flush(this);
+  }
+
   template <typename T> void insertResource(T data) {
     uint32_t id = getResourceId<T>();
 
     if (id >= resources.size()) {
       resources.resize(id + 1, nullptr);
+    }
+
+    if (!resources[id]) {
       resources[id] = new ResourceData<T>();
     }
 
@@ -674,14 +705,13 @@ public:
       SparseSetBase *set = sets[i];
 
       set->remove(this, set, e);
-
-      
     }
 
     entity_what_components[e].clear();
   };
 
   template <typename T> T *getComponent(Entity e) {
+
     SparseSet<T> set = getOrCreateSparseSet<T>();
 
     if (e >= set.sparse.size() || set.sparse[e] == NO_ENTITY)
@@ -692,9 +722,9 @@ public:
 
   template <typename T> T *getResource() {
 
-    uint32_t id = getResourceId<T>();
+    static uint32_t id = getResourceId<T>();
 
-    if (id >= resources.size()) {
+    if (id >= resources.size() || !resources[id]) {
       return nullptr;
     }
 
@@ -715,6 +745,14 @@ private:
   thread_pool::ThreadPool pool;
 
   uint32_t current_world_tick = 0;
+
+  template <typename... Ts, typename Func>
+  void iterateResourceOnly(Func &&func) {
+
+    SystemView<Ts...> view(this);
+
+    func(view, NO_ENTITY, view.template getSystemArgument<Ts>(NO_ENTITY)...);
+  }
 
   template <typename T> resource_r<T> getResourceForLoop() {
     return getResource<typename unwrapResource<T>::type>();
@@ -780,7 +818,8 @@ private:
   }
 
   template <typename T> SparseSet<T> &getOrCreateSparseSet() {
-    uint32_t type_id = getTypeId<T>();
+
+    static uint32_t type_id = getTypeId<T>();
 
     if (type_id >= sets.size())
       sets.resize(type_id + 1, nullptr);
@@ -823,37 +862,37 @@ private:
 
   std::vector<std::unordered_set<uint32_t>>
       entity_what_components; // Caches what entity has which components
+
+  using removeSparseSet = void (*)(Ecs *, SparseSetBase *, Entity);
+
+  template <typename T> static removeSparseSet makeRemoveForSparseSet() {
+    return [](Ecs *world, SparseSetBase *base, Entity e) {
+      SparseSet<T> *set = static_cast<SparseSet<T> *>(base);
+
+      uint32_t component_index = set->sparse[e];
+
+      if (component_index == NO_ENTITY)
+        return;
+
+      Entity last_entity = set->dense.back().entity;
+
+      set->dense[component_index] = set->dense.back();
+
+      set->tick[component_index] = set->tick.back();
+
+      set->sparse[last_entity] = component_index;
+
+      set->dense.pop_back();
+
+      set->tick.pop_back();
+
+      set->sparse[e] = NO_ENTITY;
+
+      set->removed.push_back(e);
+
+      world->insertResource<Removed<T>>(set->removed);
+    };
+  }
 };
-
-using removeSparseSet = void (*)(Ecs *, SparseSetBase *, Entity);
-
-template <typename T> removeSparseSet makeRemoveForSparseSet() {
-  return [](Ecs *world, SparseSetBase *base, Entity e) {
-    SparseSet<T> *set = static_cast<SparseSet<T> *>(base);
-
-    uint32_t component_index = set->sparse[e];
-
-    if (component_index == NO_ENTITY)
-      return;
-
-    Entity last_entity = set->dense.back().entity;
-
-    set->dense[component_index] = set->dense.back();
-
-    set->tick[component_index] = set->tick.back();
-
-    set->sparse[last_entity] = component_index;
-
-    set->dense.pop_back();
-
-    set->tick.pop_back();
-
-    set->sparse[e] = NO_ENTITY;
-
-    set->removed.push_back(e);
-
-    world->insertResource<Removed<T>>(set->removed);
-  };
-}
 
 } // namespace vecs

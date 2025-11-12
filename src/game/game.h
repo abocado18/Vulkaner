@@ -2,7 +2,6 @@
 
 #include "ecs/vox_ecs.h"
 
-
 #include "platform/renderer/renderer.h"
 
 #include "platform/math/math.h"
@@ -13,13 +12,6 @@
 #include <chrono>
 
 namespace game {
-
-
-
-
-
-
- 
 
 struct Time {
   float delta_time;
@@ -36,27 +28,22 @@ public:
 
   void runStartup();
 
-  void addPlugin(IPlugin &p)
-  {
-    p.build(*this);
-  }
+  void addPlugin(IPlugin &p) { p.build(*this); }
 
   vecs::Ecs world;
-
-private:
-  
-
-  Time time_data = {};
-
-  std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start;
-
-  render::RenderContext &render_ctx;
 
   vecs::Schedule Startup = {};
 
   vecs::Schedule PreUpdate = {};
   vecs::Schedule Update = {};
   vecs::Schedule PostUpdate = {};
+
+private:
+  Time time_data = {};
+
+  std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start;
+
+  render::RenderContext &render_ctx;
 };
 
 } // namespace game
