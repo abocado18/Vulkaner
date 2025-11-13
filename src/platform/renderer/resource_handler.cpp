@@ -115,9 +115,6 @@ resource_handler::ResourceHandler::~ResourceHandler() {
 
   vkDeviceWaitIdle(device);
 
-
-  
-
   vkDestroyDescriptorSetLayout(device, sampled_images_descriptor.layout,
                                nullptr);
 
@@ -255,6 +252,35 @@ resource_handler::ResourceHandler::loadImage(const std::string &path,
   bindSampledImage(handle.idx);
 
   return handle;
+}
+
+void resource_handler::ResourceHandler::writeImage(
+    resource_handler::ResourceHandle handle, const uint8_t *pixels,
+    uint32_t width, uint32_t height) {
+
+  resource_handler::StagingTransferData transfer_data = {};
+
+  {
+
+    std::memcpy(reinterpret_cast<uint8_t *>(
+                    staging_buffer.allocation_info.pMappedData) +
+                    staging_buffer.offset,
+                pixels, width * height * 4);
+
+    transfer_data.source_offset = staging_buffer.offset;
+    transfer_data.size = width * height * 4;
+
+    transfer_data.target_offset = 0;
+    transfer_data.resource_idx = handle.idx;
+  }
+
+  {
+    staging_buffer.offset += width * height * 4;
+  }
+
+  this->transfers.push_back(transfer_data);
+
+  bindSampledImage(handle.idx);
 }
 
 void resource_handler::ResourceHandler::clearStagingTransferData() {

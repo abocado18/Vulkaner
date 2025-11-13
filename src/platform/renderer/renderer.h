@@ -56,6 +56,19 @@ public:
                                          image_format);
   }
 
+  resource_handler::ResourceHandle loadImage(const std::string &path,
+                                               VkImageUsageFlags usage_flags,
+                                               VkFormat image_format) {
+
+    return resource_handler->loadImage(path, image_format, usage_flags);
+  }
+
+  void writeImage(resource_handler::ResourceHandle handle,
+                  const uint8_t *pixels, uint32_t width, uint32_t height) {
+
+    resource_handler->writeImage(handle, pixels, width, height);
+  }
+
   bool windowShouldClose() const;
 
   void update();

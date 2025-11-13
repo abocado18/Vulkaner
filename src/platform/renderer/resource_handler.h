@@ -398,6 +398,8 @@ public:
   ResourceHandle loadImage(const std::string &path, VkFormat image_format,
                            VkImageUsageFlags image_usage);
 
+  void writeImage(ResourceHandle handle, const uint8_t *pixels, uint32_t width, uint32_t height);
+
   uint64_t bindSampledImage(uint64_t resource_idx);
 
   // Create buffer and caches in hashmap, returns resource handle
