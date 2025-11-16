@@ -3,6 +3,7 @@
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
 #include <X11/Xmd.h>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -56,6 +57,21 @@ Renderer::~Renderer() {
     std::cout << "Destroy Render Resources\n";
 
     vkDeviceWaitIdle(_device);
+
+    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+
+      vkDestroyCommandPool(_device, _frames[i]._graphics_command_pool, nullptr);
+
+      if (_dedicated_compute) {
+        vkDestroyCommandPool(_device, _frames[i]._compute_command_pool,
+                             nullptr);
+      }
+
+      if (_dedicated_transfer) {
+        vkDestroyCommandPool(_device, _frames[i]._transfer_command_pool,
+                             nullptr);
+      }
+    }
 
     destroySwapchain();
 
@@ -397,8 +413,8 @@ bool Renderer::initVulkan() {
 
     // Dedicated Queues
 
-    bool dedicated_transfer = false;
-    bool dedicated_compute = false;
+    _dedicated_transfer = false;
+    _dedicated_compute = false;
 
     for (size_t i = 0; i < queue_family_properties.size(); i++) {
       const auto &queue_family = queue_family_properties[i];
@@ -408,7 +424,7 @@ bool Renderer::initVulkan() {
             !(queue_family.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
 
           _transfer_queue_family = i;
-          dedicated_transfer = true;
+          _dedicated_transfer = true;
           break;
         }
       }
@@ -422,7 +438,7 @@ bool Renderer::initVulkan() {
             !(queue_family.queueFlags & VK_QUEUE_TRANSFER_BIT)) {
 
           _compute_queue_family = i;
-          dedicated_compute = true;
+          _dedicated_compute = true;
           break;
         }
       }
@@ -441,7 +457,7 @@ bool Renderer::initVulkan() {
 
     queue_create_infos.push_back(graphics_queue_create_info);
 
-    if (dedicated_compute) {
+    if (_dedicated_compute) {
       VkDeviceQueueCreateInfo compute_queue_create_info = {};
       compute_queue_create_info.sType =
           VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -452,7 +468,7 @@ bool Renderer::initVulkan() {
       queue_create_infos.push_back(compute_queue_create_info);
     }
 
-    if (dedicated_transfer)
+    if (_dedicated_transfer)
 
     {
       VkDeviceQueueCreateInfo transfer_queue_create_info = {};
@@ -627,6 +643,79 @@ void Renderer::destroySwapchain() {
   vkDestroySwapchainKHR(_device, _swapchain, nullptr);
 }
 
-void Renderer::initCommands() {}
+void Renderer::initCommands() {
+
+  VkCommandPoolCreateInfo pool_create_info = {};
+  pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  pool_create_info.queueFamilyIndex = _graphics_queue_family;
+
+  for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+                                 &_frames[i]._graphics_command_pool),
+             "Could not create Command Pool");
+
+    VkCommandBufferAllocateInfo alloc_info = {};
+
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandBufferCount = 1;
+    alloc_info.commandPool = _frames[i]._graphics_command_pool;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+    VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
+                                      &_frames[i]._graphics_command_buffer),
+             "Could not allocate Command Buffer");
+  }
+
+  if (_dedicated_compute) {
+    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+      VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+                                   &_frames[i]._compute_command_pool),
+               "Could not create Command Pool");
+
+      VkCommandBufferAllocateInfo alloc_info = {};
+
+      alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      alloc_info.commandBufferCount = 1;
+      alloc_info.commandPool = _frames[i]._compute_command_pool;
+      alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+      VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
+                                        &_frames[i]._compute_command_buffer),
+               "Could not allocate Command Buffer");
+    }
+  } else {
+
+    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+      _frames[i]._compute_command_pool = _frames[i]._graphics_command_pool;
+      _frames[i]._compute_command_buffer = _frames[i]._graphics_command_buffer;
+    }
+  }
+
+  if (_dedicated_transfer) {
+    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+      VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+                                   &_frames[i]._transfer_command_pool),
+               "Could not create Command Pool");
+
+      VkCommandBufferAllocateInfo alloc_info = {};
+
+      alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      alloc_info.commandBufferCount = 1;
+      alloc_info.commandPool = _frames[i]._transfer_command_pool;
+      alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+      VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
+                                        &_frames[i]._transfer_command_buffer),
+               "Could not allocate Command Buffer");
+    }
+  } else {
+
+    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+      _frames[i]._transfer_command_pool = _frames[i]._graphics_command_pool;
+      _frames[i]._transfer_command_buffer = _frames[i]._graphics_command_buffer;
+    }
+  }
+}
 
 void Renderer::initSyncStructures() {}
