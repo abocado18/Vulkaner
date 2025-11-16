@@ -1,17 +1,15 @@
 #include "game.h"
 #include "ecs/vox_ecs.h"
-#include "platform/renderer/renderer.h"
 #include <chrono>
 
-#include "platform/loader/scene_loader.h"
 
-#include "required_components/loader.h"
 
-game::Game::Game(render::RenderContext &render_ctx)
-    : render_ctx(render_ctx), world() {
 
-  SceneLoaderPlugin loader;
-  addPlugin(loader);
+
+game::Game::Game()
+    :  world() {
+
+
 
   time_data.delta_time = 0.0f;
   time_data.total_time = 0.0f;
@@ -19,7 +17,7 @@ game::Game::Game(render::RenderContext &render_ctx)
 
   world.insertResource<Time>(time_data);
 
-  world.insertResource<render::RenderContext *>(&render_ctx);
+ 
 
   
 }

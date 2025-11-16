@@ -43,7 +43,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "src/")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk slang)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

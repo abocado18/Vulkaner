@@ -2,14 +2,13 @@
 
 #include "ecs/vox_ecs.h"
 
-#include "platform/renderer/renderer.h"
+
 
 #include "platform/math/math.h"
 #include <bits/types/timer_t.h>
 
 #include "plugin.h"
 
-#include <chrono>
 
 namespace game {
 
@@ -21,7 +20,7 @@ struct Time {
 
 class Game {
 public:
-  Game(render::RenderContext &render_ctx);
+  Game();
   ~Game();
 
   void tick();
@@ -43,7 +42,7 @@ private:
 
   std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start;
 
-  render::RenderContext &render_ctx;
+ 
 };
 
 } // namespace game
