@@ -24,7 +24,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
   return VK_FALSE;
 }
 
-Renderer::Renderer(uint32_t width, uint32_t height) {
+Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   _isInitialized = false;
 
@@ -40,6 +40,8 @@ Renderer::Renderer(uint32_t width, uint32_t height) {
 
   if (!initVulkan())
     return;
+
+  std::cout << "Create Resources\n";
 
   initSwapchain();
 
@@ -71,6 +73,11 @@ Renderer::~Renderer() {
         vkDestroyCommandPool(_device, _frames[i]._transfer_command_pool,
                              nullptr);
       }
+
+      vkDestroySemaphore(_device, _frames[i]._swapchain_semaphore, nullptr);
+      vkDestroySemaphore(_device, _frames[i]._render_semaphore, nullptr);
+
+      vkDestroyFence(_device, _frames[i]._render_fence, nullptr);
     }
 
     destroySwapchain();
@@ -115,12 +122,6 @@ bool Renderer::initVulkan() {
     vkEnumerateInstanceExtensionProperties(nullptr, &extension_count,
                                            available_extensions.data());
 
-    std::cout << "Available Extensions are: \n";
-
-    for (const auto &e : available_extensions) {
-      std::cout << e.extensionName << "\n";
-    }
-
     std::vector<const char *> extensions(
         glfw_extensions, glfw_extensions + glfw_extension_count);
     if constexpr (useValidationLayers) {
@@ -163,11 +164,6 @@ bool Renderer::initVulkan() {
     vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
     std::vector<VkLayerProperties> available_layers(layer_count);
     vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
-
-    std::cout << "Available Layers are\n";
-    for (size_t i = 0; i < available_layers.size(); i++) {
-      std::cout << available_layers[i].layerName << "\n";
-    }
 
     bool allLayersAvailable = [&requested_layers, &available_layers]() -> bool {
       for (const char *layerName : requested_layers) {
@@ -576,13 +572,6 @@ void Renderer::createSwapchain(uint32_t width, uint32_t height,
   create_info.surface = _surface;
   create_info.oldSwapchain = old_swapchain;
 
-  std::cout << "Creating swapchain with imageCount: "
-            << create_info.minImageCount
-            << " format: " << create_info.imageFormat
-            << " extent: " << create_info.imageExtent.width << "x"
-            << create_info.imageExtent.height << "\n"
-            << "min image count: " << create_info.minImageCount << "\n";
-
   VK_ERROR(vkCreateSwapchainKHR(_device, &create_info, nullptr, &_swapchain),
            "Could not create swapchain");
 
@@ -718,4 +707,63 @@ void Renderer::initCommands() {
   }
 }
 
-void Renderer::initSyncStructures() {}
+void Renderer::initSyncStructures() {
+
+  VkFenceCreateInfo fence_create_info = {};
+  fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+  VkSemaphoreCreateInfo semaphore_create_info = {};
+  semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+  for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+
+    VK_ERROR(vkCreateFence(_device, &fence_create_info, nullptr,
+                           &_frames[i]._render_fence),
+             "Could not create fence");
+
+    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                               &_frames[i]._render_semaphore),
+             "Could not create Render Semaphore");
+    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                               &_frames[i]._swapchain_semaphore),
+             "Could not create Swapchain Semaphore");
+  }
+}
+
+void Renderer::draw() {
+
+  VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
+                           UINT64_MAX),
+           "Wait for Fence");
+
+  VK_CHECK(vkResetFences(_device, 1, &getCurrentFrame()._render_fence),
+           "Reset Fence");
+
+  uint32_t swapchain_image_index;
+  VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, UINT64_MAX,
+                                 getCurrentFrame()._swapchain_semaphore,
+                                 nullptr, &swapchain_image_index),
+           "Swapchain Image");
+
+  VkCommandBuffer graphics_command_buffer =
+      getCurrentFrame()._graphics_command_buffer;
+  VkCommandBuffer transfer_command_buffer =
+      getCurrentFrame()._transfer_command_buffer;
+  VkCommandBuffer compute_command_buffer =
+      getCurrentFrame()._compute_command_buffer;
+
+  VK_CHECK(vkResetCommandBuffer(graphics_command_buffer, 0),
+           "Graphics Command Buffer");
+  VK_CHECK(vkResetCommandBuffer(transfer_command_buffer, 0),
+           "Transfer Command Buffer");
+  VK_CHECK(vkResetCommandBuffer(compute_command_buffer, 0),
+           "Compute Command Buffer");
+
+  VkCommandBufferBeginInfo begin_info = {};
+  begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+  VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer, &begin_info),
+           "Start Command Buffer");
+}

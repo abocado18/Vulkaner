@@ -19,6 +19,9 @@ struct FrameData {
 
   VkCommandPool _transfer_command_pool;
   VkCommandBuffer _transfer_command_buffer;
+
+  VkSemaphore _swapchain_semaphore, _render_semaphore;
+  VkFence _render_fence;
 };
 
 constexpr uint32_t FRAME_OVERLAP = 2;
@@ -27,6 +30,8 @@ class Renderer {
 public:
   Renderer(uint32_t width, uint32_t height);
   ~Renderer();
+
+  void draw();
 
 private:
   VkInstance _instance;
@@ -60,11 +65,11 @@ private:
 
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
-  inline FrameData &get_current_frame() {
+  size_t _frame_number = 0;
 
-    static size_t _frame_number = 0;
+  inline const FrameData &getCurrentFrame() const {
 
-    return _frames[_frame_number++ % FRAME_OVERLAP];
+    return _frames[_frame_number % FRAME_OVERLAP];
   };
 
   bool initVulkan();
@@ -75,5 +80,6 @@ private:
   void destroySwapchain();
 
   void initCommands();
+
   void initSyncStructures();
 };
