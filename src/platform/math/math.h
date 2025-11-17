@@ -5,7 +5,7 @@
 
 template <typename T> struct Vec3 {
 
-  Vec3<T>()
+  Vec3()
       : x(static_cast<T>(0)), y(static_cast<T>(0)), z(static_cast<T>(0)){};
 
   Vec3(T x, T y, T z) : x(x), y(y), z(z) {};

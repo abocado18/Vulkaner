@@ -1,8 +1,11 @@
 #include "renderer.h"
 #include "GLFW/glfw3.h"
+#include "platform/render/allocator/vk_mem_alloc.h"
+#include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
 #include <X11/Xmd.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -10,6 +13,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <ostream>
 #include <sys/types.h>
 #include <vector>
 
@@ -20,7 +24,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageTypeFlagsEXT types,
     const VkDebugUtilsMessengerCallbackDataEXT *callbackData, void *userData) {
 
-  std::cerr << "[VULKAN DEBUG] " << callbackData->pMessage << std::endl;
+  std::cerr << "[VULKAN DEBUG] " << callbackData->pMessage << "\n"
+            << std::endl;
   return VK_FALSE;
 }
 
@@ -75,10 +80,15 @@ Renderer::~Renderer() {
       }
 
       vkDestroySemaphore(_device, _frames[i]._swapchain_semaphore, nullptr);
-      vkDestroySemaphore(_device, _frames[i]._render_semaphore, nullptr);
+
+      for (auto &s : _frames[i]._render_semaphores) {
+        vkDestroySemaphore(_device, s, nullptr);
+      }
 
       vkDestroyFence(_device, _frames[i]._render_fence, nullptr);
     }
+
+    _main_deletion_queue.flush();
 
     destroySwapchain();
 
@@ -277,6 +287,7 @@ bool Renderer::initVulkan() {
         VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME,
     };
 
     auto getSuitableDevice = [&](std::vector<VkPhysicalDevice> &devices)
@@ -498,6 +509,29 @@ bool Renderer::initVulkan() {
     volkLoadDevice(_device);
   }
 
+  {
+    VmaAllocatorCreateInfo allocator_create_info = {};
+    allocator_create_info.physicalDevice = _chosen_gpu;
+    allocator_create_info.device = _device;
+    allocator_create_info.instance = _instance;
+    allocator_create_info.flags =
+        VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+
+    VmaVulkanFunctions vulkan_functions = {};
+
+    VK_ERROR(vmaImportVulkanFunctionsFromVolk(&allocator_create_info,
+                                              &vulkan_functions),
+             "Load Vulkan Functions");
+
+    allocator_create_info.pVulkanFunctions = &vulkan_functions;
+
+    VK_ERROR(vmaCreateAllocator(&allocator_create_info, &_allocator),
+             "Could not create Allocator");
+
+    _main_deletion_queue.pushFunction(
+        [&]() { vmaDestroyAllocator(_allocator); });
+  }
+
   return true;
 }
 
@@ -621,6 +655,43 @@ void Renderer::createSwapchain(uint32_t width, uint32_t height,
                                &_swapchain_images_views[i]),
              "Failed to create swapchain image view");
   }
+
+  {
+    VkExtent3D draw_image_extent = {width, height, 1};
+
+    _draw_image.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    _draw_image.extent = draw_image_extent;
+
+    VkImageUsageFlags draw_usage_flags =
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    VkImageCreateInfo draw_img_create_info = vk_utils::imageCreateInfo(
+        _draw_image.format, draw_usage_flags, draw_image_extent);
+
+    VmaAllocationCreateInfo draw_img_alloc_info = {};
+    draw_img_alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    draw_img_alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    VK_ERROR(vmaCreateImage(_allocator, &draw_img_create_info,
+                            &draw_img_alloc_info, &_draw_image.image,
+                            &_draw_image.allocation, nullptr),
+             "Could not create Draw Image");
+
+    VkImageViewCreateInfo draw_img_view_create_info =
+        vk_utils::imageViewCreateInfo(_draw_image.format, _draw_image.image,
+                                      VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VK_ERROR(vkCreateImageView(_device, &draw_img_view_create_info, nullptr,
+                               &_draw_image.view),
+             "Create Draw Image View");
+
+    _main_deletion_queue.pushFunction([&]() {
+      vkDestroyImageView(_device, _draw_image.view, nullptr);
+
+      vmaDestroyImage(_allocator, _draw_image.image, _draw_image.allocation);
+    });
+  }
 }
 
 void Renderer::destroySwapchain() {
@@ -722,9 +793,15 @@ void Renderer::initSyncStructures() {
                            &_frames[i]._render_fence),
              "Could not create fence");
 
-    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
-                               &_frames[i]._render_semaphore),
-             "Could not create Render Semaphore");
+    _frames[i]._render_semaphores.resize(_swapchain_images.size());
+
+    for (auto &render_semaphore : _frames[i]._render_semaphores) {
+
+      VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                                 &render_semaphore),
+               "Could not create Render Semaphore");
+    }
+
     VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
                                &_frames[i]._swapchain_semaphore),
              "Could not create Swapchain Semaphore");
@@ -733,9 +810,13 @@ void Renderer::initSyncStructures() {
 
 void Renderer::draw() {
 
+  glfwPollEvents();
+
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
                            UINT64_MAX),
            "Wait for Fence");
+
+  getCurrentFrame()._deletion_queue.flush();
 
   VK_CHECK(vkResetFences(_device, 1, &getCurrentFrame()._render_fence),
            "Reset Fence");
@@ -766,4 +847,74 @@ void Renderer::draw() {
 
   VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer, &begin_info),
            "Start Command Buffer");
+
+  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
+                             VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
+
+  drawBackground(graphics_command_buffer);
+
+  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
+                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                             _draw_image.image);
+
+  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             _swapchain_images[swapchain_image_index]);
+
+  vk_utils::copyImageToImage(
+      graphics_command_buffer, _draw_image.image,
+      _swapchain_images[swapchain_image_index],
+      {_draw_image.extent.width, _draw_image.extent.height}, _swapchain_extent);
+
+  vk_utils::transistionImage(graphics_command_buffer,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                             _swapchain_images[swapchain_image_index]);
+
+  VK_CHECK(vkEndCommandBuffer(graphics_command_buffer), "End Command Buffer");
+
+  VkCommandBufferSubmitInfoKHR command_submit_info =
+      vk_utils::commandBufferSubmitInfo(graphics_command_buffer);
+
+  VkSemaphoreSubmitInfoKHR wait_info = vk_utils::semaphoreSubmitInfo(
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+      getCurrentFrame()._swapchain_semaphore);
+
+  VkSemaphoreSubmitInfoKHR signal_info = vk_utils::semaphoreSubmitInfo(
+      VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
+      getCurrentFrame()._render_semaphores[swapchain_image_index]);
+
+  VkSubmitInfo2KHR submit_info =
+      vk_utils::submitInfo(&command_submit_info, &signal_info, &wait_info);
+
+  VK_CHECK(vkQueueSubmit2KHR(_graphics_queue, 1, &submit_info,
+                             getCurrentFrame()._render_fence),
+           "Submit Graphics Commands");
+
+  VkPresentInfoKHR present_info = {};
+  present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+  present_info.swapchainCount = 1;
+  present_info.pSwapchains = &_swapchain;
+  present_info.waitSemaphoreCount = 1;
+  present_info.pWaitSemaphores =
+      &getCurrentFrame()._render_semaphores[swapchain_image_index];
+
+  present_info.pImageIndices = &swapchain_image_index;
+
+  VK_CHECK(vkQueuePresentKHR(_graphics_queue, &present_info),
+           "Present Swapchain");
+
+  _frame_number++;
+}
+
+void Renderer::drawBackground(VkCommandBuffer cmd) {
+  VkClearColorValue clear_value = {};
+
+  clear_value = {{0.0f, 1.0f, 1.0f, 1.0f}};
+
+  VkImageSubresourceRange range =
+      vk_utils::getImageSubResourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+  vkCmdClearColorImage(cmd, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
+                       &clear_value, 1, &range);
 }

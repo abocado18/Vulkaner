@@ -8,8 +8,10 @@ int main() {
 
   Renderer renderer(1280, 720);
 
+  while (renderer.shouldUpdate()) {
 
-  
+    renderer.draw();
+  }
 
   return 0;
 }

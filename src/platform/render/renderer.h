@@ -4,11 +4,29 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <functional>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
+#include "allocator/vk_mem_alloc.h"
+
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
+
+struct DeletionQueue {
+  std::deque<std::function<void()>> deletors;
+
+  void pushFunction(std::function<void()> &&f) { deletors.push_back(f); }
+
+  void flush() {
+    for (auto it = deletors.rbegin(); it != deletors.rend(); it++) {
+      (*it)();
+    }
+
+    deletors.clear();
+  }
+};
 
 struct FrameData {
   VkCommandPool _graphics_command_pool;
@@ -20,16 +38,32 @@ struct FrameData {
   VkCommandPool _transfer_command_pool;
   VkCommandBuffer _transfer_command_buffer;
 
-  VkSemaphore _swapchain_semaphore, _render_semaphore;
+  VkSemaphore _swapchain_semaphore;
+  std::vector<VkSemaphore> _render_semaphores;
   VkFence _render_fence;
+
+  DeletionQueue _deletion_queue;
 };
 
 constexpr uint32_t FRAME_OVERLAP = 2;
+
+struct Image {
+  VkImage image;
+  VkImageView view;
+  VmaAllocation allocation;
+  VkFormat format;
+
+  VkExtent3D extent;
+};
 
 class Renderer {
 public:
   Renderer(uint32_t width, uint32_t height);
   ~Renderer();
+
+  inline bool shouldUpdate() const {
+    return !glfwWindowShouldClose(_window_handle);
+  }
 
   void draw();
 
@@ -39,6 +73,8 @@ private:
   VkDevice _device;
   VkSurfaceKHR _surface;
 
+  VmaAllocator _allocator;
+
   VkDebugUtilsMessengerEXT _debug_messenger;
 
   VkSwapchainKHR _swapchain;
@@ -46,6 +82,9 @@ private:
   std::vector<VkImage> _swapchain_images;
   std::vector<VkImageView> _swapchain_images_views;
   VkExtent2D _swapchain_extent;
+
+
+  Image _draw_image;
 
   VkQueue _graphics_queue;
   uint32_t _graphics_queue_family;
@@ -63,11 +102,13 @@ private:
 
   GLFWwindow *_window_handle;
 
+  DeletionQueue _main_deletion_queue;
+
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
   size_t _frame_number = 0;
 
-  inline const FrameData &getCurrentFrame() const {
+  inline FrameData &getCurrentFrame() {
 
     return _frames[_frame_number % FRAME_OVERLAP];
   };
@@ -82,4 +123,8 @@ private:
   void initCommands();
 
   void initSyncStructures();
+
+
+  void drawBackground(VkCommandBuffer cmd);
+
 };
