@@ -1,6 +1,7 @@
 #include "pipeline.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
+#include <dlfcn.h>
 #include <sys/types.h>
 #include <vector>
 
@@ -80,4 +81,80 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDevice device,
            "Create Descriptor Set");
 
   return set;
+}
+
+PipelineManager::PipelineManager() {
+
+#ifndef PRODUCTION_BUILD
+#ifdef _WIN32
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+  dxcLibHandle = LoadLibrary(L"dxcompiler.dll");
+  if (!dxcLibHandle) {
+    std::cerr << "Failed to load dxcompiler.dll\n";
+    abort();
+    return;
+  }
+
+  auto DxcCreateInstance =
+      (HRESULT(WINAPI *)(REFCLSID, REFIID, void **))GetProcAddress(
+          dxcLibHandle, "DxcCreateInstance");
+#else
+  dxcLibHandle = dlopen("libdxcompiler.so", RTLD_LAZY | RTLD_LOCAL);
+  if (!dxcLibHandle) {
+    std::cerr << "Failed to load libdxcompiler.so\n";
+    abort();
+    return;
+  }
+
+  auto DxcCreateInstance = (HRESULT (*)(REFCLSID, REFIID, void **))dlsym(
+      dxcLibHandle, "DxcCreateInstance");
+#endif
+
+  if (!DxcCreateInstance) {
+    std::cerr << "Failed to get DxcCreateInstance function\n";
+    return;
+  }
+
+  HRESULT res;
+  res = DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&library));
+  if (FAILED(res)) {
+    std::cerr << "Could not initialize Dxc Library\n";
+    return;
+  }
+
+  res = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
+  if (FAILED(res)) {
+    std::cerr << "Could not initialize Dxc Compiler\n";
+    return;
+  }
+
+  res = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils));
+  if (FAILED(res)) {
+    std::cerr << "Could not initialize Dxc Utils\n";
+    return;
+  }
+
+  std::cout << "Pipeline Manager created\n";
+#endif
+}
+
+PipelineManager::~PipelineManager() {
+
+#ifndef PRODUCTION_BUILD
+
+#ifdef _WIN32
+  if (dxcLibHandle) {
+    FreeLibrary(dxcLibHandle);
+    dxcLibHandle = nullptr;
+  }
+  CoUninitialize(); // Uninitialize COM
+#else
+  if (dxcLibHandle) {
+    dlclose(dxcLibHandle);
+    dxcLibHandle = nullptr;
+  }
+#endif
+
+#endif
 }

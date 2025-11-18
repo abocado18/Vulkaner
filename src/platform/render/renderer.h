@@ -76,6 +76,9 @@ private:
 
   VmaAllocator _allocator;
 
+
+  PipelineManager *_pipeline_manager;
+
   VkDebugUtilsMessengerEXT _debug_messenger;
 
   VkSwapchainKHR _swapchain;

@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 
 
-
+option(PRODUCTION_BUILD "Turn on when used for finished product" OFF)
 
 
 find_package(Vulkan REQUIRED)
@@ -24,8 +24,8 @@ add_subdirectory(deps/glfw)
 
 #Volk for loading vulkan pointers
 
-if (WIN32)
-   set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
+if(WIN32)
+    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 elseif(UNIX)
     set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_XCB_KHR)
 
@@ -43,6 +43,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "src/")
 
+
+
+
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
 
 
@@ -57,11 +60,25 @@ set(ASSET_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_compile_definitions(${PROJECT_NAME} PRIVATE ASSET_PATH="${ASSET_PATH}")
 
 
+if(PRODUCTION_BUILD)
 
-if (MSVC)
-    target_compile_options(${PROJECT_NAME}  PRIVATE /O2 /Ob2 /DNDEBUG) 
-elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(${PROJECT_NAME}  PRIVATE -O3 -DNDEBUG)
+    message("Is Finished Production Build")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE PRODUCTION_BUILD)
+
+else()
+
+    message("Is not finished Production Build")
+
+    target_include_directories(${PROJECT_NAME} PRIVATE "deps/dxc/include/")
+
+endif()
+
+
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
 
 endif()
 

@@ -573,6 +573,14 @@ bool Renderer::initVulkan() {
         [&]() { vmaDestroyAllocator(_allocator); });
   }
 
+  {
+    _pipeline_manager = new PipelineManager();
+
+    _main_deletion_queue.pushFunction([&]() {
+      delete _pipeline_manager;
+    });
+  }
+
   return true;
 }
 
