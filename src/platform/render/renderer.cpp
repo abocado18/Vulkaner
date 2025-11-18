@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "GLFW/glfw3.h"
 #include "platform/render/allocator/vk_mem_alloc.h"
+#include "platform/render/pipeline.h"
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
@@ -24,8 +25,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageTypeFlagsEXT types,
     const VkDebugUtilsMessengerCallbackDataEXT *callbackData, void *userData) {
 
-  std::cerr << "[VULKAN DEBUG] " << callbackData->pMessage << "\n"
-            << std::endl;
+  std::cerr << "[VULKAN DEBUG] " << callbackData->pMessage << "\n" << std::endl;
   return VK_FALSE;
 }
 
@@ -53,6 +53,8 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   initCommands();
 
   initSyncStructures();
+
+  initDescriptors();
 
   _isInitialized = true;
 }
@@ -106,6 +108,45 @@ Renderer::~Renderer() {
   } else {
     std::cout << "Renderer was never initialized\n";
   }
+}
+
+void Renderer::initDescriptors() {
+  std::vector<DescriptorAllocator::PoolSizeRatio> sizes = {
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+  };
+
+  _global_descriptor_allocator.initPool(_device, 10, sizes);
+  {
+    DescriptorSetLayoutBuilder builder;
+    builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    _draw_image_descriptor_layout =
+        builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
+  }
+
+  _draw_image_descriptors = _global_descriptor_allocator.allocate(
+      _device, _draw_image_descriptor_layout);
+
+  VkDescriptorImageInfo image_info = {};
+  image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  image_info.imageView = _draw_image.view;
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+
+  write.dstBinding = 0;
+  write.dstSet = _draw_image_descriptors;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  write.pImageInfo = &image_info;
+
+  vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
+
+  _main_deletion_queue.pushFunction([&]() {
+    _global_descriptor_allocator.destroyPool(_device);
+
+    vkDestroyDescriptorSetLayout(_device, _draw_image_descriptor_layout,
+                                 nullptr);
+  });
 }
 
 bool Renderer::initVulkan() {

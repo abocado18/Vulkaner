@@ -1,5 +1,6 @@
 #pragma once
 
+#include "platform/render/pipeline.h"
 #include "volk.h"
 #include <array>
 #include <cstddef>
@@ -83,9 +84,6 @@ private:
   std::vector<VkImageView> _swapchain_images_views;
   VkExtent2D _swapchain_extent;
 
-
-  Image _draw_image;
-
   VkQueue _graphics_queue;
   uint32_t _graphics_queue_family;
 
@@ -103,6 +101,13 @@ private:
   GLFWwindow *_window_handle;
 
   DeletionQueue _main_deletion_queue;
+
+  DescriptorAllocator _global_descriptor_allocator;
+
+  Image _draw_image;
+
+  VkDescriptorSet _draw_image_descriptors;
+  VkDescriptorSetLayout _draw_image_descriptor_layout;
 
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
@@ -124,7 +129,7 @@ private:
 
   void initSyncStructures();
 
+  void initDescriptors();
 
   void drawBackground(VkCommandBuffer cmd);
-
 };
