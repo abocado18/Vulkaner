@@ -2,6 +2,9 @@
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
 #include <dlfcn.h>
+#include <dxc/WinAdapter.h>
+#include <dxc/dxcapi.h>
+#include <fstream>
 #include <sys/types.h>
 #include <vector>
 
@@ -158,3 +161,34 @@ PipelineManager::~PipelineManager() {
 
 #endif
 }
+
+#ifndef PRODUCTION_BUILD
+
+bool PipelineManager::hlslToSpv(const std::string &hlsl_path,
+                                const std::string &out_spv) {
+
+  HRESULT hres;
+
+  std::string source;
+
+  std::ifstream file(hlsl_path);
+
+  source.assign((std::istreambuf_iterator<char>(file)),
+                std::istreambuf_iterator<char>());
+
+  CComPtr<IDxcBlobEncoding> source_blob;
+
+  hres = utils->CreateBlob(source.data(), source.size(), CP_UTF8, &source_blob);
+
+  if (FAILED(hres)) {
+
+    std::cout << "File " << hlsl_path << " not found\n";
+    return false;
+  }
+
+  
+
+
+}
+
+#endif

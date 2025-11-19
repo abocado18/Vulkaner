@@ -68,6 +68,10 @@ private:
   CComPtr<IDxcCompiler3> compiler;
   CComPtr<IDxcUtils> utils;
 
+  
+
+  bool hlslToSpv(const std::string &hlsl_path, const std::string &out_Spv);
+
 #ifdef _WIN32
 
   HMODULE dxcLibHandle;

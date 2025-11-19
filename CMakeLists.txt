@@ -21,6 +21,7 @@ file(GLOB_RECURSE MY_CODE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE
 
 add_subdirectory(deps/glfw)
 
+add_subdirectory(deps/vk-bootstrap)
 
 #Volk for loading vulkan pointers
 
@@ -46,7 +47,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE "src/")
 
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

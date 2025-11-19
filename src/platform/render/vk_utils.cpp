@@ -8,8 +8,8 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
                                 uint32_t src_queue_family,
                                 uint32_t dst_queue_family) {
 
-  VkImageMemoryBarrier2KHR image_barrier = {};
-  image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
+  VkImageMemoryBarrier2 image_barrier = {};
+  image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
 
   image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   image_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
@@ -38,12 +38,12 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
 
   image_barrier.image = image;
 
-  VkDependencyInfoKHR dep_info = {};
-  dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+  VkDependencyInfo dep_info = {};
+  dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
   dep_info.imageMemoryBarrierCount = 1;
   dep_info.pImageMemoryBarriers = &image_barrier;
 
-  vkCmdPipelineBarrier2KHR(cmd_buffer, &dep_info);
+  vkCmdPipelineBarrier2(cmd_buffer, &dep_info);
 }
 
 VkImageSubresourceRange
@@ -59,10 +59,10 @@ vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask) {
   return range;
 }
 
-VkCommandBufferSubmitInfoKHR
+VkCommandBufferSubmitInfo
 vk_utils::commandBufferSubmitInfo(VkCommandBuffer cmd_buffer) {
 
-  VkCommandBufferSubmitInfoKHR info = {};
+  VkCommandBufferSubmitInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
   info.pNext = nullptr;
   info.commandBuffer = cmd_buffer;
@@ -71,8 +71,8 @@ vk_utils::commandBufferSubmitInfo(VkCommandBuffer cmd_buffer) {
   return info;
 }
 
-VkSemaphoreSubmitInfoKHR
-vk_utils::semaphoreSubmitInfo(VkPipelineStageFlags2KHR stage_mask,
+VkSemaphoreSubmitInfo
+vk_utils::semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask,
                               VkSemaphore semaphore) {
 
   VkSemaphoreSubmitInfo submit_info = {};
@@ -86,13 +86,13 @@ vk_utils::semaphoreSubmitInfo(VkPipelineStageFlags2KHR stage_mask,
   return submit_info;
 }
 
-VkSubmitInfo2KHR
-vk_utils::submitInfo(VkCommandBufferSubmitInfoKHR *cmd,
-                     VkSemaphoreSubmitInfoKHR *signal_semaphore_info,
-                     VkSemaphoreSubmitInfoKHR *wait_semaphore_info) {
+VkSubmitInfo2
+vk_utils::submitInfo(VkCommandBufferSubmitInfo *cmd,
+                     VkSemaphoreSubmitInfo *signal_semaphore_info,
+                     VkSemaphoreSubmitInfo *wait_semaphore_info) {
 
-  VkSubmitInfo2KHR info = {};
-  info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR;
+  VkSubmitInfo2 info = {};
+  info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
   info.pNext = nullptr;
 
   info.waitSemaphoreInfoCount = wait_semaphore_info == nullptr ? 0 : 1;
@@ -137,8 +137,8 @@ void vk_utils::copyImageToImage(VkCommandBuffer cmd, VkImage source,
                                 VkImage dst, VkExtent2D src_size,
                                 VkExtent2D dst_size) {
 
-  VkImageBlit2KHR blit_region = {};
-  blit_region.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2_KHR;
+  VkImageBlit2 blit_region = {};
+  blit_region.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
 
   blit_region.srcOffsets[0] = {0, 0, 0};
   blit_region.dstOffsets[0] = {0, 0, 0};
@@ -161,8 +161,8 @@ void vk_utils::copyImageToImage(VkCommandBuffer cmd, VkImage source,
   blit_region.dstSubresource.layerCount = 1;
   blit_region.dstSubresource.mipLevel = 0;
 
-  VkBlitImageInfo2KHR blit_info = {};
-  blit_info.sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2_KHR;
+  VkBlitImageInfo2 blit_info = {};
+  blit_info.sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2;
   blit_info.dstImage = dst;
   blit_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   blit_info.srcImage = source;
@@ -171,7 +171,7 @@ void vk_utils::copyImageToImage(VkCommandBuffer cmd, VkImage source,
   blit_info.regionCount = 1;
   blit_info.pRegions = &blit_region;
 
-  vkCmdBlitImage2KHR(cmd, &blit_info);
+  vkCmdBlitImage2(cmd, &blit_info);
 }
 
 VkImageViewCreateInfo

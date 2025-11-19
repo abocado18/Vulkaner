@@ -21,15 +21,15 @@ void transistionImage(VkCommandBuffer cmd_buffer, VkImageLayout current_layout,
 VkImageSubresourceRange
 getImageSubResourceRange(VkImageAspectFlags aspect_mask);
 
-VkSemaphoreSubmitInfoKHR
-semaphoreSubmitInfo(VkPipelineStageFlags2KHR stage_mask, VkSemaphore semaphore);
+VkSemaphoreSubmitInfo
+semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask, VkSemaphore semaphore);
 
-VkCommandBufferSubmitInfoKHR
+VkCommandBufferSubmitInfo
 commandBufferSubmitInfo(VkCommandBuffer cmd_buffer);
 
-VkSubmitInfo2KHR submitInfo(VkCommandBufferSubmitInfoKHR *cmd,
-                            VkSemaphoreSubmitInfoKHR *signal_semaphore_info,
-                            VkSemaphoreSubmitInfoKHR *wait_semaphore_info);
+VkSubmitInfo2 submitInfo(VkCommandBufferSubmitInfo *cmd,
+                            VkSemaphoreSubmitInfo *signal_semaphore_info,
+                            VkSemaphoreSubmitInfo *wait_semaphore_info);
 
 VkImageCreateInfo imageCreateInfo(VkFormat format,
                                   VkImageUsageFlags usage_flags, VkExtent3D);
