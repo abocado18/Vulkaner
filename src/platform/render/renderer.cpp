@@ -270,7 +270,7 @@ bool Renderer::initVulkan() {
   }
 
   {
-    _pipeline_manager = new PipelineManager(SHADER_PATH);
+    _pipeline_manager = new PipelineManager(SHADER_PATH, _device);
 
     _main_deletion_queue.pushFunction([&]() { delete _pipeline_manager; });
   }
