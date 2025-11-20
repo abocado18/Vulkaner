@@ -57,6 +57,8 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   initDescriptors();
 
+  initPipelines();
+
   _isInitialized = true;
 }
 
@@ -202,7 +204,6 @@ bool Renderer::initVulkan() {
 
     vkb::Device vkb_device = device_builder.build().value();
 
-   
     _device = vkb_device.device;
     _chosen_gpu = physical_device.physical_device;
 
@@ -552,7 +553,7 @@ void Renderer::draw() {
       vk_utils::submitInfo(&command_submit_info, &signal_info, &wait_info);
 
   VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info,
-                             getCurrentFrame()._render_fence),
+                          getCurrentFrame()._render_fence),
            "Submit Graphics Commands");
 
   VkPresentInfoKHR present_info = {};
@@ -581,4 +582,28 @@ void Renderer::drawBackground(VkCommandBuffer cmd) {
 
   vkCmdClearColorImage(cmd, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
                        &clear_value, 1, &range);
+}
+
+void Renderer::initPipelines() { initBackgroundPipelines(); }
+
+void Renderer::initBackgroundPipelines() {
+  VkPipelineLayoutCreateInfo computeLayout{};
+  computeLayout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  computeLayout.pNext = nullptr;
+  computeLayout.pSetLayouts = &_draw_image_descriptor_layout;
+  computeLayout.setLayoutCount = 1;
+
+  VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr,
+                                  &_gradient_pipeline_layout),
+           "Create Gtadient Layout");
+
+  auto res =
+      _pipeline_manager->createShaderModule("compute.slang", "computeMain");
+
+  if (!res.has_value()) {
+    std::cout << "COuld not get Gradient";
+    std::abort();
+  }
+
+  VkShaderModule g_shader_module = res.value();
 }

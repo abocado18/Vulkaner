@@ -112,6 +112,8 @@ private:
   VkDescriptorSet _draw_image_descriptors;
   VkDescriptorSetLayout _draw_image_descriptor_layout;
 
+  VkPipelineLayout _gradient_pipeline_layout;
+
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
   size_t _frame_number = 0;
@@ -133,6 +135,9 @@ private:
   void initSyncStructures();
 
   void initDescriptors();
+
+  void initPipelines();
+  void initBackgroundPipelines();
 
   void drawBackground(VkCommandBuffer cmd);
 };

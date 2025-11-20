@@ -50,6 +50,9 @@ public:
   PipelineManager(const std::string path, VkDevice &device);
   ~PipelineManager();
 
+
+   std::optional<VkShaderModule> createShaderModule(const std::string &name, const std::string &entry_point_name);
+
 private:
 #ifndef PRODUCTION_BUILD
 
@@ -61,7 +64,7 @@ private:
 
 #endif
 
-  std::optional<VkShaderModule> createShaderModule(const std::string &name, const std::string &entry_point_name);
+ 
 
   bool runtime_compilation_possible;
 
