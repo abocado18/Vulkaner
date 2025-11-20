@@ -1,12 +1,22 @@
 #include "pipeline.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
-#include <dlfcn.h>
-#include <dxc/WinAdapter.h>
-#include <dxc/dxcapi.h>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
-#include <sys/types.h>
+#include <optional>
+#include <slang-com-helper.h>
+#include <string>
 #include <vector>
+
+#include "slang-com-ptr.h"
+#include "slang.h"
+
+void diagnoseIfNeeded(slang::IBlob *diagnosticsBlob) {
+  if (diagnosticsBlob != nullptr) {
+    std::cout << (const char *)diagnosticsBlob->getBufferPointer() << std::endl;
+  }
+}
 
 void DescriptorSetLayoutBuilder::addBinding(uint32_t binding,
                                             VkDescriptorType type) {
@@ -86,109 +96,194 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDevice device,
   return set;
 }
 
-PipelineManager::PipelineManager() {
+PipelineManager::PipelineManager(const std::string path, VkDevice &device)
+    : _device(device), _shader_path(path) {
 
 #ifndef PRODUCTION_BUILD
-#ifdef _WIN32
-  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-  dxcLibHandle = LoadLibrary(L"dxcompiler.dll");
-  if (!dxcLibHandle) {
-    std::cerr << "Failed to load dxcompiler.dll\n";
-    abort();
-    return;
-  }
+  SlangGlobalSessionDesc desc = {};
 
-  auto DxcCreateInstance =
-      (HRESULT(WINAPI *)(REFCLSID, REFIID, void **))GetProcAddress(
-          dxcLibHandle, "DxcCreateInstance");
-#else
-  dxcLibHandle = dlopen("libdxcompiler.so", RTLD_LAZY | RTLD_LOCAL);
-  if (!dxcLibHandle) {
-    std::cerr << "Failed to load libdxcompiler.so\n";
-    abort();
-    return;
-  }
+  slang::createGlobalSession(&desc, _global_session.writeRef());
 
-  auto DxcCreateInstance = (HRESULT (*)(REFCLSID, REFIID, void **))dlsym(
-      dxcLibHandle, "DxcCreateInstance");
+  slang::SessionDesc session_desc = {};
+
+  slang::TargetDesc target_desc = {};
+  target_desc.format = SLANG_SPIRV;
+  target_desc.profile = _global_session->findProfile("spirv_1_5");
+
+  session_desc.targetCount = 1;
+  session_desc.targets = &target_desc;
+
+  std::array<const char *, 1> search_paths = {_shader_path.c_str()};
+
+  session_desc.searchPathCount = search_paths.size();
+  session_desc.searchPaths = search_paths.data();
+
+  std::array<slang::CompilerOptionEntry, 1> options = {
+      {slang::CompilerOptionName::EmitSpirvDirectly,
+       {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
+  session_desc.compilerOptionEntries = options.data();
+  session_desc.compilerOptionEntryCount = options.size();
+
+  _global_session->createSession(session_desc, _session.writeRef());
+
 #endif
-
-  if (!DxcCreateInstance) {
-    std::cerr << "Failed to get DxcCreateInstance function\n";
-    return;
-  }
-
-  HRESULT res;
-  res = DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&library));
-  if (FAILED(res)) {
-    std::cerr << "Could not initialize Dxc Library\n";
-    return;
-  }
-
-  res = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
-  if (FAILED(res)) {
-    std::cerr << "Could not initialize Dxc Compiler\n";
-    return;
-  }
-
-  res = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils));
-  if (FAILED(res)) {
-    std::cerr << "Could not initialize Dxc Utils\n";
-    return;
-  }
 
   std::cout << "Pipeline Manager created\n";
-#endif
 }
 
-PipelineManager::~PipelineManager() {
+PipelineManager::~PipelineManager() {}
+
+std::optional<VkShaderModule>
+PipelineManager::createShaderModule(const std::string &name,
+                                    const std::string &entry_point_name) {
+
+  const std::string total_file_path = _shader_path + "/" + name;
+
+  bool isSpv = [&]() -> bool {
+    std::ifstream file(total_file_path, std::ios::binary);
+    if (!file)
+      return false;
+
+    uint32_t magic = 0;
+    file.read(reinterpret_cast<char *>(&magic), sizeof(magic));
+
+    if (file.gcount() != sizeof(magic))
+      return false;
+
+    return magic == 0x07230203;
+  }();
+
+  std::vector<uint32_t> spirv_data = {};
 
 #ifndef PRODUCTION_BUILD
 
-#ifdef _WIN32
-  if (dxcLibHandle) {
-    FreeLibrary(dxcLibHandle);
-    dxcLibHandle = nullptr;
+  if (!isSpv) {
+    if (!slangToSpv(name, entry_point_name, spirv_data)) {
+      return std::nullopt;
+    }
   }
-  CoUninitialize(); // Uninitialize COM
+
 #else
-  if (dxcLibHandle) {
-    dlclose(dxcLibHandle);
-    dxcLibHandle = nullptr;
-  }
-#endif
+
+  if (!isSpv)
+    return std::nullopt;
 
 #endif
+
+  else {
+
+    std::ifstream file(total_file_path, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+      return std::nullopt;
+    }
+
+    size_t file_size = (size_t)file.tellg();
+
+    spirv_data.resize(file_size / sizeof(uint32_t));
+
+    file.seekg(0);
+
+    file.read((char *)spirv_data.data(), file_size);
+
+    file.close();
+  }
+
+  VkShaderModuleCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  create_info.pNext = nullptr;
+
+  create_info.codeSize = spirv_data.size() * sizeof(uint32_t);
+  create_info.pCode = spirv_data.data();
+
+  VkShaderModule shader_module;
+
+  if (vkCreateShaderModule(_device, &create_info, nullptr, &shader_module) !=
+      VK_SUCCESS)
+    return std::nullopt;
+
+  return shader_module;
 }
 
 #ifndef PRODUCTION_BUILD
 
-bool PipelineManager::hlslToSpv(const std::string &hlsl_path,
-                                const std::string &out_spv) {
+bool PipelineManager::slangToSpv(const std::string &name,
+                                 const std::string &entry_point_name,
+                                 std::vector<uint32_t> &out_code) {
 
-  HRESULT hres;
+  Slang::ComPtr<slang::IModule> slang_module;
 
-  std::string source;
+  {
+    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+    const char *moduleName = "shortest";
+    const char *modulePath = "shortest.slang";
+    slang_module = _session->loadModule(name.c_str());
 
-  std::ifstream file(hlsl_path);
-
-  source.assign((std::istreambuf_iterator<char>(file)),
-                std::istreambuf_iterator<char>());
-
-  CComPtr<IDxcBlobEncoding> source_blob;
-
-  hres = utils->CreateBlob(source.data(), source.size(), CP_UTF8, &source_blob);
-
-  if (FAILED(hres)) {
-
-    std::cout << "File " << hlsl_path << " not found\n";
-    return false;
+    diagnoseIfNeeded(diagnosticsBlob);
+    if (!slang_module) {
+      return false;
+    }
   }
 
-  
+  Slang::ComPtr<slang::IEntryPoint> entry_point;
 
+  {
 
+    Slang::ComPtr<slang::IBlob> diagnostics_blob;
+    slang_module->findEntryPointByName(entry_point_name.c_str(),
+                                       entry_point.writeRef());
+
+    if (!entry_point) {
+      std::cout << "Error getting entry point" << std::endl;
+      return false;
+    }
+  }
+
+  std::array<slang::IComponentType *, 2> component_types = {slang_module,
+                                                            entry_point};
+
+  Slang::ComPtr<slang::IComponentType> composed_program;
+  {
+    Slang::ComPtr<slang::IBlob> diagnostics_blob;
+
+    SlangResult r = _session->createCompositeComponentType(
+        component_types.data(), component_types.size(),
+        composed_program.writeRef(), diagnostics_blob.writeRef());
+
+    SLANG_RETURN_FALSE_ON_FAIL(r);
+  }
+
+  Slang::ComPtr<slang::IComponentType> linked_program;
+  {
+    Slang::ComPtr<slang::IBlob> diagnostics_blob;
+
+    SlangResult r = composed_program->link(linked_program.writeRef(),
+                                           diagnostics_blob.writeRef());
+
+    diagnoseIfNeeded(diagnostics_blob);
+
+    SLANG_RETURN_FALSE_ON_FAIL(r);
+  }
+
+  Slang::ComPtr<slang::IBlob> spirv_code;
+  {
+    Slang::ComPtr<slang::IBlob> diagnostics_blob;
+
+    SlangResult r = linked_program->getEntryPointCode(
+        0, 0, spirv_code.writeRef(), diagnostics_blob.writeRef());
+
+    diagnoseIfNeeded(diagnostics_blob);
+
+    SLANG_RETURN_FALSE_ON_FAIL(r);
+  }
+
+  out_code.resize(spirv_code->getBufferSize() / sizeof(uint32_t));
+
+  std::memcpy(out_code.data(), spirv_code->getBufferPointer(),
+              spirv_code->getBufferSize());
+
+  return true;
 }
 
 #endif

@@ -1,28 +1,17 @@
 #pragma once
 
+#include "slang-com-helper.h"
+#include "slang-com-ptr.h"
+#include "slang.h"
+
 #include "volk.h"
 #include "vulkan/vulkan_core.h"
+#include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 #ifndef PRODUCTION_BUILD
-
-#ifdef WIN32
-#include "dxc/WinAdapter.h"
-
-#else
-
-#define BOOL VulkanDXCBool
-
-#endif
-
-#include "dxc/dxcapi.h"
-
-#ifndef WIN32
-
-#undef BOOL
-
-#endif
 
 #endif
 
@@ -58,30 +47,25 @@ struct DescriptorAllocator {
 
 class PipelineManager {
 public:
-  PipelineManager();
+  PipelineManager(const std::string path, VkDevice &device);
   ~PipelineManager();
 
 private:
 #ifndef PRODUCTION_BUILD
 
-  CComPtr<IDxcLibrary> library;
-  CComPtr<IDxcCompiler3> compiler;
-  CComPtr<IDxcUtils> utils;
+  Slang::ComPtr<slang::IGlobalSession> _global_session;
+  Slang::ComPtr<slang::ISession> _session;
 
-  
-
-  bool hlslToSpv(const std::string &hlsl_path, const std::string &out_Spv);
-
-#ifdef _WIN32
-
-  HMODULE dxcLibHandle;
-
-#else
-  void *dxcLibHandle;
+  bool slangToSpv(const std::string &name, const std::string &entry_point_name,
+                  std::vector<uint32_t> &out_code);
 
 #endif
 
-#endif
+  std::optional<VkShaderModule> createShaderModule(const std::string &name, const std::string &entry_point_name);
 
-      bool runtime_compilation_possible;
+  bool runtime_compilation_possible;
+
+  const std::string _shader_path;
+
+  VkDevice &_device;
 };

@@ -70,16 +70,25 @@ else()
 
     message("Is not finished Production Build")
 
-    target_include_directories(${PROJECT_NAME} PRIVATE "deps/dxc/include/")
+    target_include_directories(${PROJECT_NAME} PRIVATE "deps/slang/include/")
+
+    
+
+   
+   find_package(slang REQUIRED PATHS "${CMAKE_SOURCE_DIR}/deps/slang" NO_DEFAULT_PATH)
+
+   target_link_libraries(${PROJECT_NAME} PUBLIC slang::slang)
+
+    
 
 endif()
 
 
 
-if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
+    if(MSVC)
+        target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
 
-endif()
+    endif()
 

@@ -6,7 +6,7 @@
     "configurations": [
         {
             "name": "Launch",
-            "type": "cppdbg",
+            "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/<your program>",
             "args": [],
