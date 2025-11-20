@@ -518,6 +518,16 @@ void Renderer::draw() {
 
   drawBackground(graphics_command_buffer);
 
+  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    _gradient_pipeline);
+  vkCmdBindDescriptorSets(
+      graphics_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      _gradient_pipeline_layout, 0, 1, &_draw_image_descriptors, 0, nullptr);
+
+  vkCmdDispatch(graphics_command_buffer,
+                std::ceil(_draw_image.extent.width / 16.0),
+                std::ceil(_draw_image.extent.height / 16.0), 1);
+
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                              _draw_image.image);
@@ -606,4 +616,30 @@ void Renderer::initBackgroundPipelines() {
   }
 
   VkShaderModule g_shader_module = res.value();
+
+  VkPipelineShaderStageCreateInfo stageinfo{};
+  stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stageinfo.pNext = nullptr;
+  stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  stageinfo.module = g_shader_module;
+  stageinfo.pName = "main";
+
+  VkComputePipelineCreateInfo computePipelineCreateInfo{};
+  computePipelineCreateInfo.sType =
+      VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  computePipelineCreateInfo.pNext = nullptr;
+  computePipelineCreateInfo.layout = _gradient_pipeline_layout;
+  computePipelineCreateInfo.stage = stageinfo;
+
+  VK_ERROR(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1,
+                                    &computePipelineCreateInfo, nullptr,
+                                    &_gradient_pipeline),
+           "ff");
+
+  vkDestroyShaderModule(_device, g_shader_module, nullptr);
+
+  _main_deletion_queue.pushFunction([&]() {
+    vkDestroyPipelineLayout(_device, _gradient_pipeline_layout, nullptr);
+    vkDestroyPipeline(_device, _gradient_pipeline, nullptr);
+  });
 }

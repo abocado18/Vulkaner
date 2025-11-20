@@ -109,10 +109,13 @@ private:
 
   Image _draw_image;
 
+  
+
   VkDescriptorSet _draw_image_descriptors;
   VkDescriptorSetLayout _draw_image_descriptor_layout;
 
   VkPipelineLayout _gradient_pipeline_layout;
+  VkPipeline _gradient_pipeline;
 
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
