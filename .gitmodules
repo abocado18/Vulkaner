@@ -1,3 +1,6 @@
 [submodule "deps/vk-bootstrap"]
 	path = deps/vk-bootstrap
 	url = https://github.com/charles-lunarg/vk-bootstrap
+[submodule "deps/slang"]
+	path = deps/slang
+	url = https://github.com/shader-slang/slang.git

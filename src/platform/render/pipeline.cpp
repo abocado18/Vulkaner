@@ -101,9 +101,11 @@ PipelineManager::PipelineManager(const std::string path, VkDevice &device)
 
 #ifndef PRODUCTION_BUILD
 
-  SlangGlobalSessionDesc desc = {};
 
-  slang::createGlobalSession(&desc, _global_session.writeRef());
+
+
+
+  slang::createGlobalSession(_global_session.writeRef());
 
   slang::SessionDesc session_desc = {};
 

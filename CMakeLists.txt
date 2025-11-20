@@ -70,14 +70,11 @@ else()
 
     message("Is not finished Production Build")
 
-    target_include_directories(${PROJECT_NAME} PRIVATE "deps/slang/include/")
+    include(cmake/FetchSlang.cmake)
 
-    
+    target_link_libraries(${PROJECT_NAME} PRIVATE slang)
 
-   
-   find_package(slang REQUIRED PATHS "${CMAKE_SOURCE_DIR}/deps/slang" NO_DEFAULT_PATH)
-
-   target_link_libraries(${PROJECT_NAME} PUBLIC slang::slang)
+    target_copy_slang_binaries(${PROJECT_NAME})
 
     
 
