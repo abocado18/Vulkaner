@@ -15,6 +15,11 @@
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
 struct DeletionQueue {
   std::deque<std::function<void()>> deletors;
 
@@ -111,11 +116,17 @@ private:
 
   
 
+
+
+
   VkDescriptorSet _draw_image_descriptors;
   VkDescriptorSetLayout _draw_image_descriptor_layout;
 
   VkPipelineLayout _gradient_pipeline_layout;
   VkPipeline _gradient_pipeline;
+
+
+  VkDescriptorPool _imm_pool;
 
   std::array<FrameData, FRAME_OVERLAP> _frames;
 
@@ -141,6 +152,8 @@ private:
 
   void initPipelines();
   void initBackgroundPipelines();
+
+  void initImgui();
 
   void drawBackground(VkCommandBuffer cmd);
 };

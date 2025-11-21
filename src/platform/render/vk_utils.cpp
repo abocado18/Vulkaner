@@ -1,5 +1,6 @@
 #include "vk_utils.h"
 #include <cstdint>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
@@ -86,10 +87,9 @@ vk_utils::semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask,
   return submit_info;
 }
 
-VkSubmitInfo2
-vk_utils::submitInfo(VkCommandBufferSubmitInfo *cmd,
-                     VkSemaphoreSubmitInfo *signal_semaphore_info,
-                     VkSemaphoreSubmitInfo *wait_semaphore_info) {
+VkSubmitInfo2 vk_utils::submitInfo(VkCommandBufferSubmitInfo *cmd,
+                                   VkSemaphoreSubmitInfo *signal_semaphore_info,
+                                   VkSemaphoreSubmitInfo *wait_semaphore_info) {
 
   VkSubmitInfo2 info = {};
   info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
@@ -193,4 +193,40 @@ vk_utils::imageViewCreateInfo(VkFormat format, VkImage image,
   return info;
 }
 
+VkRenderingAttachmentInfo vk_utils::attachmentInfo(VkImageView view,
+                                                   VkClearValue *clear,
+                                                   VkImageLayout layout) {
+  VkRenderingAttachmentInfo colorAttachment{};
+  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  colorAttachment.pNext = nullptr;
 
+  colorAttachment.imageView = view;
+  colorAttachment.imageLayout = layout;
+  colorAttachment.loadOp =
+      clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  if (clear) {
+    colorAttachment.clearValue = *clear;
+  }
+
+  return colorAttachment;
+}
+
+VkRenderingInfo
+vk_utils::renderingInfo(VkRenderingAttachmentInfo *color_attachments,
+                        uint32_t color_attachments_count, VkExtent2D extent,
+                        VkOffset2D offset, VkRenderingAttachmentInfo *depth,
+                        VkRenderingAttachmentInfo *stencil) {
+  VkRenderingInfo rendering_info = {};
+  rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  rendering_info.pColorAttachments = color_attachments;
+  rendering_info.colorAttachmentCount = color_attachments_count;
+  rendering_info.renderArea.extent = extent;
+  rendering_info.renderArea.offset = offset;
+  rendering_info.layerCount = 1;
+  rendering_info.viewMask = 0;
+  rendering_info.pDepthAttachment = depth;
+  rendering_info.pStencilAttachment = stencil;
+
+  return rendering_info;
+}

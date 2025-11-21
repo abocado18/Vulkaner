@@ -12,14 +12,21 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <map>
 #include <ostream>
 #include <sys/types.h>
 #include <vector>
 
 #include "VkBootstrap.h"
 
+#ifdef PRODUCTION_BUILD
+
+constexpr bool useValidationLayers = false;
+
+#else
+
 constexpr bool useValidationLayers = true;
+
+#endif
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -58,6 +65,8 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   initDescriptors();
 
   initPipelines();
+
+  initImgui();
 
   _isInitialized = true;
 }
@@ -477,6 +486,14 @@ void Renderer::draw() {
 
   glfwPollEvents();
 
+  {
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::ShowDemoWindow();
+  }
+
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
                            UINT64_MAX),
            "Wait for Fence");
@@ -527,6 +544,24 @@ void Renderer::draw() {
   vkCmdDispatch(graphics_command_buffer,
                 std::ceil(_draw_image.extent.width / 16.0),
                 std::ceil(_draw_image.extent.height / 16.0), 1);
+
+  {
+    // ImGUI
+
+    VkRenderingAttachmentInfo imm_attachment_info = vk_utils::attachmentInfo(
+        _draw_image.view, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    VkRenderingInfo imm_rendering_info = vk_utils::renderingInfo(
+        &imm_attachment_info, 1, _swapchain_extent, {0, 0}, nullptr, nullptr);
+
+    vkCmdBeginRendering(graphics_command_buffer, &imm_rendering_info);
+
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
+                                    graphics_command_buffer);
+
+    vkCmdEndRendering(graphics_command_buffer);
+  }
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -641,5 +676,74 @@ void Renderer::initBackgroundPipelines() {
   _main_deletion_queue.pushFunction([&]() {
     vkDestroyPipelineLayout(_device, _gradient_pipeline_layout, nullptr);
     vkDestroyPipeline(_device, _gradient_pipeline, nullptr);
+  });
+}
+
+void Renderer::initImgui() {
+
+  VkDescriptorPoolSize pool_sizes[] = {
+      {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+      {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+  VkDescriptorPoolCreateInfo pool_info = {};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 1000;
+  pool_info.poolSizeCount = (uint32_t)std::size(pool_sizes);
+  pool_info.pPoolSizes = pool_sizes;
+
+  VK_ERROR(vkCreateDescriptorPool(_device, &pool_info, nullptr, &_imm_pool),
+           "Create ImGui Descriptor Pool");
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+  ImGui_ImplGlfw_InitForVulkan(_window_handle, true);
+
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.ApiVersion = VK_VERSION_1_3;
+  init_info.Instance = _instance;
+  init_info.PhysicalDevice = _chosen_gpu;
+  init_info.Device = _device;
+  init_info.QueueFamily = _graphics_queue_family;
+  init_info.Queue = _graphics_queue;
+  init_info.DescriptorPool = _imm_pool;
+  init_info.MinImageCount = 2;
+  init_info.ImageCount = 2;
+  init_info.UseDynamicRendering = true;
+
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo = {};
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount =
+      1;
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo
+      .pColorAttachmentFormats = &_swapchain_image_format;
+
+  init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+  ImGui_ImplVulkan_Init(&init_info);
+
+  _main_deletion_queue.pushFunction([&]() {
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+
+    ImGui::DestroyContext();
+
+    vkDestroyDescriptorPool(_device, _imm_pool, nullptr);
   });
 }

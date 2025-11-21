@@ -19,6 +19,8 @@ file(GLOB_RECURSE MY_CODE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE
 
 
 
+
+
 add_subdirectory(deps/glfw)
 
 add_subdirectory(deps/vk-bootstrap)
@@ -37,7 +39,10 @@ endif()
 add_subdirectory(deps/volk)
 
 
-add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${MY_CODE_FILES})
+
+
+
+add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${IMGUI_HEADER_FILES} ${MY_CODE_FILES} ${IMGUI_CODE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
@@ -46,8 +51,44 @@ target_include_directories(${PROJECT_NAME} PRIVATE "src/")
 
 
 
+target_compile_definitions(${PROJECT_NAME} PUBLIC VK_NO_PROTOTYPES) #Use Volk 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap)
+
+#Setup ImGui
+set(imgui_external_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/imgui")
+
+
+add_library(imgui
+    ${imgui_external_SOURCE_DIR}/imgui.cpp
+    ${imgui_external_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_external_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_external_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_external_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_external_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+    ${imgui_external_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+
+)
+
+target_include_directories(imgui PUBLIC
+    ${imgui_external_SOURCE_DIR}
+    ${imgui_external_SOURCE_DIR}/backends
+   
+)
+
+target_include_directories(imgui PUBLIC ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(imgui PUBLIC glfw volk)
+
+target_compile_definitions(imgui PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
+
+
+target_include_directories(${PROJECT_NAME} PRIVATE deps/imgui/)
+target_include_directories(${PROJECT_NAME} PRIVATE deps/imgui/backends)
+
+
+
+
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)
@@ -76,16 +117,16 @@ else()
 
     target_copy_slang_binaries(${PROJECT_NAME})
 
-    
+
 
 endif()
 
 
 
-    if(MSVC)
-        target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
 
-    endif()
+endif()
 
