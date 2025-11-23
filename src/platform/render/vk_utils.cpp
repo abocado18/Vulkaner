@@ -230,3 +230,14 @@ vk_utils::renderingInfo(VkRenderingAttachmentInfo *color_attachments,
 
   return rendering_info;
 }
+
+VkPipelineShaderStageCreateInfo
+vk_utils::pipelineShaderStageCreateInfo(VkShaderStageFlagBits shader_stage,
+                                        VkShaderModule shader_module) {
+
+  VkPipelineShaderStageCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  create_info.stage = shader_stage;
+  create_info.module = shader_module;
+  return create_info;
+}

@@ -38,7 +38,7 @@ endif()
 
 add_subdirectory(deps/volk)
 
-
+add_subdirectory(deps/fastgltf)
 
 
 
@@ -88,7 +88,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE deps/imgui/backends)
 
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui fastgltf)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

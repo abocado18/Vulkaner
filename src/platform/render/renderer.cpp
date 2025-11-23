@@ -40,6 +40,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   _isInitialized = false;
+  _resized_requested = false;
 
   if (glfwInit() == GLFW_FALSE)
     return;
@@ -47,6 +48,16 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
   _window_handle = glfwCreateWindow(width, height, "Vulkan", nullptr, nullptr);
+
+  glfwSetFramebufferSizeCallback(
+      _window_handle, [](GLFWwindow *window, int width, int height) {
+        Renderer *r =
+            reinterpret_cast<Renderer *>(glfwGetWindowUserPointer(window));
+
+        r->resizeSwapchain();
+      });
+
+  glfwSetWindowUserPointer(_window_handle, this);
 
   if (!_window_handle)
     return;
@@ -57,6 +68,8 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   std::cout << "Create Resources\n";
 
   initSwapchain();
+
+  initDrawImage();
 
   initCommands();
 
@@ -138,20 +151,11 @@ void Renderer::initDescriptors() {
   _draw_image_descriptors = _global_descriptor_allocator.allocate(
       _device, _draw_image_descriptor_layout);
 
-  VkDescriptorImageInfo image_info = {};
-  image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-  image_info.imageView = _draw_image.view;
+  DescriptorWriter writer;
+  writer.writeImage(0, _draw_image.view, VK_NULL_HANDLE,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
-  VkWriteDescriptorSet write = {};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-
-  write.dstBinding = 0;
-  write.dstSet = _draw_image_descriptors;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  write.pImageInfo = &image_info;
-
-  vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
+  writer.updateSet(_device, _draw_image_descriptors);
 
   _main_deletion_queue.pushFunction([&]() {
     _global_descriptor_allocator.destroyPool(_device);
@@ -329,9 +333,21 @@ void Renderer::createSwapchain(uint32_t width, uint32_t height,
   }
 
   _swapchain_images_views = swapchain.get_image_views().value();
+}
 
+void Renderer::destroySwapchain() {
+
+  for (VkImageView &v : _swapchain_images_views) {
+    vkDestroyImageView(_device, v, nullptr);
+  }
+
+  vkDestroySwapchainKHR(_device, _swapchain, nullptr);
+}
+
+void Renderer::initDrawImage() {
   {
-    VkExtent3D draw_image_extent = {width, height, 1};
+    VkExtent3D draw_image_extent = {_swapchain_extent.width,
+                                    _swapchain_extent.height, 1};
 
     _draw_image.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     _draw_image.extent = draw_image_extent;
@@ -366,15 +382,6 @@ void Renderer::createSwapchain(uint32_t width, uint32_t height,
       vmaDestroyImage(_allocator, _draw_image.image, _draw_image.allocation);
     });
   }
-}
-
-void Renderer::destroySwapchain() {
-
-  for (VkImageView &v : _swapchain_images_views) {
-    vkDestroyImageView(_device, v, nullptr);
-  }
-
-  vkDestroySwapchainKHR(_device, _swapchain, nullptr);
 }
 
 void Renderer::initCommands() {
@@ -487,11 +494,10 @@ void Renderer::draw() {
   glfwPollEvents();
 
   {
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
-    ImGui::ShowDemoWindow();
+    if (_resized_requested) {
+      resizeSwapchain();
+      return;
+    }
   }
 
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
@@ -504,10 +510,15 @@ void Renderer::draw() {
            "Reset Fence");
 
   uint32_t swapchain_image_index;
-  VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, UINT64_MAX,
-                                 getCurrentFrame()._swapchain_semaphore,
-                                 nullptr, &swapchain_image_index),
-           "Swapchain Image");
+
+  VkResult aquire_res = vkAcquireNextImageKHR(
+      _device, _swapchain, UINT64_MAX, getCurrentFrame()._swapchain_semaphore,
+      nullptr, &swapchain_image_index);
+
+  if (aquire_res == VK_ERROR_OUT_OF_DATE_KHR) {
+    _resized_requested = true;
+    return;
+  }
 
   VkCommandBuffer graphics_command_buffer =
       getCurrentFrame()._graphics_command_buffer;
@@ -545,24 +556,6 @@ void Renderer::draw() {
                 std::ceil(_draw_image.extent.width / 16.0),
                 std::ceil(_draw_image.extent.height / 16.0), 1);
 
-  {
-    // ImGUI
-
-    VkRenderingAttachmentInfo imm_attachment_info = vk_utils::attachmentInfo(
-        _draw_image.view, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-    VkRenderingInfo imm_rendering_info = vk_utils::renderingInfo(
-        &imm_attachment_info, 1, _swapchain_extent, {0, 0}, nullptr, nullptr);
-
-    vkCmdBeginRendering(graphics_command_buffer, &imm_rendering_info);
-
-    ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
-                                    graphics_command_buffer);
-
-    vkCmdEndRendering(graphics_command_buffer);
-  }
-
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                              _draw_image.image);
@@ -580,6 +573,34 @@ void Renderer::draw() {
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                              _swapchain_images[swapchain_image_index]);
+
+  /*
+{
+// ImGUI
+
+VkRenderingAttachmentInfo imm_attachment_info = vk_utils::attachmentInfo(
+_swapchain_images_views[swapchain_image_index], nullptr,
+VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+VkRenderingInfo imm_rendering_info = vk_utils::renderingInfo(
+&imm_attachment_info, 1, _swapchain_extent, {0, 0}, nullptr, nullptr);
+
+vkCmdBeginRendering(graphics_command_buffer, &imm_rendering_info);
+
+ImGui_ImplVulkan_NewFrame();
+ImGui_ImplGlfw_NewFrame();
+ImGui::NewFrame();
+
+ImGui::ShowDemoWindow();
+
+ImGui::Render();
+ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
+         graphics_command_buffer);
+
+vkCmdEndRendering(graphics_command_buffer);
+}
+
+*/
 
   VK_CHECK(vkEndCommandBuffer(graphics_command_buffer), "End Command Buffer");
 
@@ -611,8 +632,11 @@ void Renderer::draw() {
 
   present_info.pImageIndices = &swapchain_image_index;
 
-  VK_CHECK(vkQueuePresentKHR(_graphics_queue, &present_info),
-           "Present Swapchain");
+  VkResult present_res = vkQueuePresentKHR(_graphics_queue, &present_info);
+
+  if (present_res == VK_ERROR_OUT_OF_DATE_KHR) {
+    _resized_requested = true;
+  }
 
   _frame_number++;
 }
@@ -746,4 +770,50 @@ void Renderer::initImgui() {
 
     vkDestroyDescriptorPool(_device, _imm_pool, nullptr);
   });
+}
+
+void Renderer::resizeSwapchain() {
+  vkDeviceWaitIdle(_device);
+
+  int width, height;
+
+  glfwGetFramebufferSize(_window_handle, &width, &height);
+
+  if (width == 0 || height == 0) {
+    return;
+  }
+
+  VkSwapchainKHR old_swapchain = _swapchain;
+
+  createSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+                  old_swapchain);
+
+  _resized_requested = false;
+}
+
+Buffer Renderer::createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
+                              VmaMemoryUsage memory_usage) {
+
+  VkBufferCreateInfo buffer_info = {};
+  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+
+  buffer_info.size = alloc_size;
+  buffer_info.usage = usage;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = memory_usage;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+  Buffer new_buffer;
+
+  VK_CHECK(vmaCreateBuffer(_allocator, &buffer_info, &alloc_info,
+                           &new_buffer.buffer, &new_buffer.allocation,
+                           &new_buffer.allocation_info),
+           "Create new Buffer");
+
+  return new_buffer;
+}
+
+void Renderer::destroyBuffer(const Buffer &buffer) {
+  vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
 }

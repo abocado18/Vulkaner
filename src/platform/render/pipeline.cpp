@@ -1,4 +1,5 @@
 #include "pipeline.h"
+#include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
 #include <cstdint>
@@ -100,10 +101,6 @@ PipelineManager::PipelineManager(const std::string path, VkDevice &device)
     : _device(device), _shader_path(path) {
 
 #ifndef PRODUCTION_BUILD
-
-
-
-
 
   slang::createGlobalSession(_global_session.writeRef());
 
@@ -289,3 +286,336 @@ bool PipelineManager::slangToSpv(const std::string &name,
 }
 
 #endif
+
+void PipelineBuilder::clear() {
+  _input_assembly = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+
+  _rasterizer = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+
+  _color_blend_attachment = {};
+
+  _multisampling = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+
+  _pipeline_layout = {};
+
+  _depth_stencil = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+
+  _render_info = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+
+  _shader_stages.clear();
+}
+
+VkPipeline PipelineBuilder::buildPipeline(VkDevice device) {
+  VkPipelineViewportStateCreateInfo viewport_state = {};
+  viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+
+  viewport_state.scissorCount = 1;
+  viewport_state.viewportCount = 1;
+
+  VkPipelineColorBlendStateCreateInfo color_blending = {};
+  color_blending.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+
+  color_blending.logicOpEnable = VK_FALSE;
+  color_blending.logicOp = VK_LOGIC_OP_COPY;
+  color_blending.attachmentCount = 1;
+  color_blending.pAttachments = &_color_blend_attachment;
+
+  VkPipelineVertexInputStateCreateInfo _vertex_input_info = {};
+  _vertex_input_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+  VkGraphicsPipelineCreateInfo pipeline_info = {};
+  pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipeline_info.pStages = _shader_stages.data();
+  pipeline_info.stageCount = _shader_stages.size();
+  pipeline_info.pVertexInputState = &_vertex_input_info;
+  pipeline_info.pInputAssemblyState = &_input_assembly;
+  pipeline_info.pViewportState = &viewport_state;
+  pipeline_info.pRasterizationState = &_rasterizer;
+  pipeline_info.pMultisampleState = &_multisampling;
+  pipeline_info.pColorBlendState = &color_blending;
+  pipeline_info.pDepthStencilState = &_depth_stencil;
+  pipeline_info.layout = _pipeline_layout;
+
+  VkDynamicState state[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                            VK_DYNAMIC_STATE_SCISSOR};
+
+  VkPipelineDynamicStateCreateInfo dynamic_info = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+  dynamic_info.pDynamicStates = state;
+  dynamic_info.dynamicStateCount = 2;
+
+  pipeline_info.pDynamicState = &dynamic_info;
+
+  VkPipeline pipeline;
+
+  VkResult create_res = vkCreateGraphicsPipelines(
+      device, nullptr, 1, &pipeline_info, nullptr, &pipeline);
+
+  if (create_res != VK_SUCCESS) {
+    std::cerr << "Could not create graphics pipeline\n";
+    return VK_NULL_HANDLE;
+  }
+
+  return pipeline;
+}
+
+void PipelineBuilder::setShaders(VkShaderModule vertex_shader,
+                                 VkShaderModule pixel_shader) {
+  _shader_stages.clear();
+  _shader_stages.push_back(vk_utils::pipelineShaderStageCreateInfo(
+      VK_SHADER_STAGE_VERTEX_BIT, vertex_shader));
+
+  _shader_stages.push_back(vk_utils::pipelineShaderStageCreateInfo(
+      VK_SHADER_STAGE_FRAGMENT_BIT, pixel_shader));
+}
+
+void PipelineBuilder::setInputTopology(VkPrimitiveTopology topology) {
+
+  _input_assembly.topology = topology;
+  _input_assembly.primitiveRestartEnable = VK_FALSE;
+};
+
+void PipelineBuilder::setPolygonMode(VkPolygonMode mode) {
+  _rasterizer.polygonMode = mode;
+  _rasterizer.lineWidth = 1.0f;
+}
+
+void PipelineBuilder::setCullMode(VkCullModeFlagBits cull_mode,
+                                  VkFrontFace front_face) {
+  _rasterizer.cullMode = cull_mode;
+  _rasterizer.frontFace = front_face;
+}
+
+void PipelineBuilder::setMultiSamplingNone() {
+  _multisampling.sampleShadingEnable = VK_FALSE;
+  _multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  _multisampling.minSampleShading = 1.0f;
+  _multisampling.pSampleMask = nullptr;
+  _multisampling.alphaToCoverageEnable = VK_FALSE;
+  _multisampling.alphaToOneEnable = VK_FALSE;
+}
+
+void PipelineBuilder::disableBlending() {
+
+  _color_blend_attachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+  _color_blend_attachment.blendEnable = VK_FALSE;
+}
+
+void PipelineBuilder::setColorAttachmentFormat(VkFormat format) {
+  _color_attachment_format = format;
+
+  _render_info.colorAttachmentCount = 1;
+  _render_info.pColorAttachmentFormats = &_color_attachment_format;
+}
+
+void PipelineBuilder::setDepthFormat(VkFormat format) {
+  _render_info.depthAttachmentFormat = format;
+}
+
+void PipelineBuilder::disableDepthtest() {
+  _depth_stencil.depthTestEnable = VK_FALSE;
+  _depth_stencil.depthWriteEnable = VK_FALSE;
+  _depth_stencil.depthCompareOp = VK_COMPARE_OP_NEVER;
+  _depth_stencil.depthBoundsTestEnable = VK_FALSE;
+  _depth_stencil.stencilTestEnable = VK_FALSE;
+  _depth_stencil.front = {};
+  _depth_stencil.back = {};
+  _depth_stencil.minDepthBounds = 0.f;
+  _depth_stencil.maxDepthBounds = 1.f;
+}
+
+void PipelineBuilder::enableBlendingAdditive() {
+  _color_blend_attachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  _color_blend_attachment.blendEnable = VK_TRUE;
+  _color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  _color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+  _color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+  _color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  _color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+  _color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
+void PipelineBuilder::enableBlendingAlphaBlend() {
+  _color_blend_attachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  _color_blend_attachment.blendEnable = VK_TRUE;
+  _color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  _color_blend_attachment.dstColorBlendFactor =
+      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  _color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+  _color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  _color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+  _color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
+VkDescriptorPool DescriptorAllocatorGrowable::getPool(VkDevice device) {
+
+  VkDescriptorPool new_pool;
+
+  if (ready_pools.size() != 0) {
+
+    new_pool = ready_pools.back();
+    ready_pools.pop_back();
+  } else {
+
+    new_pool = createPool(device, sets_per_pool, ratios);
+
+    sets_per_pool = sets_per_pool * 1.5f;
+
+    if (sets_per_pool > 4092) {
+
+      sets_per_pool = 4092;
+    }
+  }
+
+  return new_pool;
+}
+
+VkDescriptorPool
+DescriptorAllocatorGrowable::createPool(VkDevice device, uint32_t set_count,
+                                        std::span<PoolSizeRatio> pool_ratios) {
+
+  std::vector<VkDescriptorPoolSize> pool_sizes;
+
+  pool_sizes.reserve(pool_ratios.size());
+
+  for (PoolSizeRatio ratio : pool_ratios) {
+
+    pool_sizes.push_back(VkDescriptorPoolSize{
+        .type = ratio.type,
+        .descriptorCount = static_cast<uint32_t>(ratio.ratio * set_count)});
+  }
+
+  VkDescriptorPoolCreateInfo pool_info = {};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = 0;
+  pool_info.maxSets = set_count;
+  pool_info.poolSizeCount = pool_sizes.size();
+  pool_info.pPoolSizes = pool_sizes.data();
+
+  VkDescriptorPool new_pool;
+  vkCreateDescriptorPool(device, &pool_info, nullptr, &new_pool);
+
+  return new_pool;
+}
+
+void DescriptorAllocatorGrowable::init(VkDevice device, uint32_t max_sets,
+                                       std::span<PoolSizeRatio> pool_ratios) {
+  ratios.clear();
+
+  for (auto r : pool_ratios) {
+    ratios.push_back(r);
+  }
+
+  VkDescriptorPool new_pool = createPool(device, max_sets, pool_ratios);
+
+  sets_per_pool = max_sets * 1.5f;
+
+  ready_pools.push_back(new_pool);
+}
+
+void DescriptorAllocatorGrowable::clearPools(VkDevice device) {
+  for (auto p : ready_pools) {
+    vkDestroyDescriptorPool(device, p, nullptr);
+  }
+
+  for (auto p : full_pools) {
+    vkDestroyDescriptorPool(device, p, nullptr);
+  }
+
+  full_pools.clear();
+}
+
+VkDescriptorSet DescriptorAllocatorGrowable::allocate(
+    VkDevice device, VkDescriptorSetLayout layout, void *p_next) {
+  VkDescriptorPool pool_to_use = getPool(device);
+
+  VkDescriptorSetAllocateInfo allocate_info = {};
+  allocate_info.pNext = p_next;
+  allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocate_info.descriptorPool = pool_to_use;
+  allocate_info.descriptorSetCount = 1;
+  allocate_info.pSetLayouts = &layout;
+
+  VkDescriptorSet ds;
+
+  VkResult result = vkAllocateDescriptorSets(device, &allocate_info, &ds);
+
+  if (result == VK_ERROR_OUT_OF_POOL_MEMORY ||
+      result == VK_ERROR_FRAGMENTED_POOL) {
+
+    full_pools.push_back(pool_to_use);
+
+    pool_to_use = getPool(device);
+
+    VK_ERROR(vkAllocateDescriptorSets(device, &allocate_info, &ds),
+             "Allocate Descriptor Set");
+  }
+
+  ready_pools.push_back(pool_to_use);
+
+  return ds;
+}
+
+void DescriptorWriter::writeBuffer(int binding, VkBuffer buffer, size_t size,
+                                   size_t offset, VkDescriptorType type) {
+
+  VkDescriptorBufferInfo &info =
+      buffer_infos.emplace_back(VkDescriptorBufferInfo{
+          .buffer = buffer, .offset = offset, .range = size});
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstBinding = binding;
+  write.dstSet = VK_NULL_HANDLE;
+  write.descriptorCount = 1;
+  write.descriptorType = type;
+  write.pBufferInfo = &info;
+
+  writes.push_back(write);
+}
+
+void DescriptorWriter::writeImage(int binding, VkImageView image,
+                                  VkSampler sampler, VkImageLayout layout,
+                                  VkDescriptorType type) {
+
+  VkDescriptorImageInfo &info = image_infos.emplace_back(VkDescriptorImageInfo{
+      .sampler = sampler, .imageView = image, .imageLayout = layout});
+
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstBinding = binding;
+  write.dstSet = VK_NULL_HANDLE;
+  write.descriptorType = type;
+  write.pImageInfo = &info;
+  write.descriptorCount = 1;
+
+  writes.push_back(write);
+}
+
+void DescriptorWriter::clear() {
+
+  image_infos.clear();
+  writes.clear();
+  buffer_infos.clear();
+}
+
+void DescriptorWriter::updateSet(VkDevice device, VkDescriptorSet set) {
+  for (auto &write : writes) {
+    write.dstSet = set;
+  }
+
+  vkUpdateDescriptorSets(device, writes.size(), writes.data(), 0, nullptr);
+}

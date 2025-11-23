@@ -43,4 +43,8 @@ VkRenderingInfo renderingInfo(VkRenderingAttachmentInfo *color_attachments,
                               VkRenderingAttachmentInfo *depth,
                               VkRenderingAttachmentInfo *stencil);
 
+VkPipelineShaderStageCreateInfo
+pipelineShaderStageCreateInfo(VkShaderStageFlagBits shader_stage,
+                              VkShaderModule shader_module);
+
 } // namespace vk_utils

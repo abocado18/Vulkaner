@@ -15,7 +15,6 @@
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 
-
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -59,7 +58,16 @@ struct Image {
   VmaAllocation allocation;
   VkFormat format;
 
+  VkImageLayout current_layout;
+
   VkExtent3D extent;
+};
+
+struct Buffer {
+
+  VkBuffer buffer;
+  VmaAllocation allocation;
+  VmaAllocationInfo allocation_info;
 };
 
 class Renderer {
@@ -73,6 +81,12 @@ public:
 
   void draw();
 
+  // Move to Resources later
+  Buffer createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
+                      VmaMemoryUsage memory_usage);
+
+  void destroyBuffer(const Buffer &buffer);
+
 private:
   VkInstance _instance;
   VkPhysicalDevice _chosen_gpu;
@@ -80,7 +94,6 @@ private:
   VkSurfaceKHR _surface;
 
   VmaAllocator _allocator;
-
 
   PipelineManager *_pipeline_manager;
 
@@ -106,6 +119,8 @@ private:
   bool _dedicated_transfer;
   bool _dedicated_compute;
 
+  bool _resized_requested;
+
   GLFWwindow *_window_handle;
 
   DeletionQueue _main_deletion_queue;
@@ -114,17 +129,11 @@ private:
 
   Image _draw_image;
 
-  
-
-
-
-
   VkDescriptorSet _draw_image_descriptors;
   VkDescriptorSetLayout _draw_image_descriptor_layout;
 
   VkPipelineLayout _gradient_pipeline_layout;
   VkPipeline _gradient_pipeline;
-
 
   VkDescriptorPool _imm_pool;
 
@@ -143,6 +152,10 @@ private:
   void createSwapchain(uint32_t width, uint32_t height,
                        VkSwapchainKHR old_swapchain = VK_NULL_HANDLE);
   void destroySwapchain();
+
+  void resizeSwapchain();
+
+  void initDrawImage();
 
   void initCommands();
 
