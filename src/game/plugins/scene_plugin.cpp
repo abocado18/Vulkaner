@@ -1,36 +1,61 @@
 #include "scene_plugin.h"
-#include "fastgltf/core.hpp"
-#include "fastgltf/types.hpp"
+
+#include "assimp/Importer.hpp"
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/required_components/name.h"
+#include "game/required_components/transform.h"
 #include "platform/render/renderer.h"
 #include <filesystem>
+
+#include <iostream>
 
 using namespace vecs;
 
 void ScenePlugin::build(game::Game &game) {
 
-  game.world.addSystem<ResMut<Renderer *>, Added<Read<LoadScenePlugin>>>(
-      game.Update,
-      [](auto view, Entity e, Renderer *renderer, LoadScenePlugin &load) {
-        LoadedScene loaded_scene;
+  std::cout << "Initialize Scene Plugin\n";
 
-        fastgltf::Parser parser{};
+  game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>,
+                       Added<Read<LoadScenePlugin>>>(
+      game.Update, [](auto view, Entity e, Commands &cmd, Renderer *renderer,
+                      LoadScenePlugin &load) {
+        Assimp::Importer importer;
 
-        constexpr auto gltfOptions =
-            fastgltf::Options::DontRequireValidAssetMember |
-            fastgltf::Options::AllowDouble |
-            fastgltf::Options::LoadExternalBuffers |
-            fastgltf::Options::LoadExternalImages;
+        const aiScene *scene =
+            importer.ReadFile(load.load_scene.c_str(),
+                              aiProcess_Triangulate | aiProcess_GenNormals |
+                                  aiProcess_OptimizeMeshes);
 
-        std::filesystem::path path = load.load_scene;
+        if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE ||
+            !scene->mRootNode) {
 
-        fastgltf::GltfDataBuffer data;
-        data.FromPath(path);
+          std::cout << "Could not load Scene\n";
 
-        fastgltf::Expected<fastgltf::Asset> res =
-            parser.loadGltf(data, path.parent_path(), gltfOptions);
+          cmd.push(
 
-        fastgltf::Asset &gltf = res.get();
+              [e](Ecs *world) {
+              
+
+                world->removeComponent<LoadScenePlugin>(e);
+              });
+
+          return;
+        }
+
+        // Load Textures
+        {
+          if (scene->HasTextures()) {
+            for (size_t i = 0; i < scene->mNumTextures; i++) {
+
+              auto *tex = scene->mTextures[i];
+
+              uint32_t width = static_cast<uint32_t>(tex->mWidth);
+              uint32_t height = static_cast<uint32_t>(tex->mHeight);
+
+              //Load Texture to GPU here
+            }
+          }
+        }
       });
 }

@@ -19,19 +19,10 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
-struct DeletionQueue {
-  std::deque<std::function<void()>> deletors;
 
-  void pushFunction(std::function<void()> &&f) { deletors.push_back(f); }
+#include "deletion_queue.h"
 
-  void flush() {
-    for (auto it = deletors.rbegin(); it != deletors.rend(); it++) {
-      (*it)();
-    }
-
-    deletors.clear();
-  }
-};
+#include "resources.h"
 
 struct FrameData {
   VkCommandPool _graphics_command_pool;
@@ -47,28 +38,12 @@ struct FrameData {
   std::vector<VkSemaphore> _render_semaphores;
   VkFence _render_fence;
 
-  DeletionQueue _deletion_queue;
+  DeletionQueue<> _deletion_queue;
 };
 
 constexpr uint32_t FRAME_OVERLAP = 2;
 
-struct Image {
-  VkImage image;
-  VkImageView view;
-  VmaAllocation allocation;
-  VkFormat format;
 
-  VkImageLayout current_layout;
-
-  VkExtent3D extent;
-};
-
-struct Buffer {
-
-  VkBuffer buffer;
-  VmaAllocation allocation;
-  VmaAllocationInfo allocation_info;
-};
 
 class Renderer {
 public:
@@ -86,6 +61,8 @@ public:
                       VmaMemoryUsage memory_usage);
 
   void destroyBuffer(const Buffer &buffer);
+
+ 
 
 private:
   VkInstance _instance;
@@ -123,7 +100,7 @@ private:
 
   GLFWwindow *_window_handle;
 
-  DeletionQueue _main_deletion_queue;
+  DeletionQueue<> _main_deletion_queue;
 
   DescriptorAllocator _global_descriptor_allocator;
 

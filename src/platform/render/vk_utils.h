@@ -47,4 +47,7 @@ VkPipelineShaderStageCreateInfo
 pipelineShaderStageCreateInfo(VkShaderStageFlagBits shader_stage,
                               VkShaderModule shader_module);
 
+
+                              
+
 } // namespace vk_utils

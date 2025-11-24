@@ -38,9 +38,18 @@ endif()
 
 add_subdirectory(deps/volk)
 
-add_subdirectory(deps/fastgltf)
+if(PRODUCTION_BUILD)
 
+    add_subdirectory(deps/assimp)
 
+else()
+    
+
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "Build Assimp as shared library" FORCE)
+    add_subdirectory(deps/assimp)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable Shared for other libs" FORCE)
+
+endif()
 
 add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${IMGUI_HEADER_FILES} ${MY_CODE_FILES} ${IMGUI_CODE_FILES})
 
@@ -85,10 +94,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE deps/imgui/)
 target_include_directories(${PROJECT_NAME} PRIVATE deps/imgui/backends)
 
 
+target_include_directories(${PROJECT_NAME} PRIVATE deps/assimp/include)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR}/deps/assimp/include)
 
 
-
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui fastgltf)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui assimp)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

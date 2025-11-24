@@ -439,10 +439,9 @@ public:
 
   template <typename T> void removeComponent(Entity e) {
 
-    SparseSet<T> *set = getOrCreateSparseSet<T>();
+    SparseSet<T> &set = getOrCreateSparseSet<T>();
 
-    if (set == nullptr)
-      return;
+   
 
     uint32_t comp_index = getTypeId<T>();
 
@@ -454,9 +453,9 @@ public:
 
     entity_what_components[e].erase(comp_index);
 
-    set->remove(this, set, e);
+    set.remove(this, &set, e);
 
-    insertResource<Removed<T>>(set->removed);
+    insertResource<Removed<T>>(set.removed);
   }
 
   template <typename... Ts, typename Func> void forEach(Func &&func) {

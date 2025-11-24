@@ -817,3 +817,5 @@ Buffer Renderer::createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
 void Renderer::destroyBuffer(const Buffer &buffer) {
   vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
 }
+
+
