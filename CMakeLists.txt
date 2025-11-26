@@ -38,18 +38,10 @@ endif()
 
 add_subdirectory(deps/volk)
 
-if(PRODUCTION_BUILD)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+add_subdirectory(deps/json)
 
-    add_subdirectory(deps/assimp)
 
-else()
-    
-
-    set(BUILD_SHARED_LIBS ON CACHE BOOL "Build Assimp as shared library" FORCE)
-    add_subdirectory(deps/assimp)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable Shared for other libs" FORCE)
-
-endif()
 
 add_executable(${PROJECT_NAME} ${MY_HEADER_FILES} ${IMGUI_HEADER_FILES} ${MY_CODE_FILES} ${IMGUI_CODE_FILES})
 
@@ -98,7 +90,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE deps/assimp/include)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR}/deps/assimp/include)
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui assimp)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui nlohmann_json::nlohmann_json)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

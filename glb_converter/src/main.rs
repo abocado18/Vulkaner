@@ -187,13 +187,13 @@ fn main() -> anyhow::Result<()> {
             mesh.name = m.name().unwrap_or_default().to_string();
             mesh.id = uuid;
 
-            mesh.vertex_size = mesh_data.len();
+            mesh.vertex_size = mesh_data.len() * std::mem::size_of::<MeshData>();
             mesh.vertex_offset = total_offset;
 
-            total_offset += mesh.vertex_size * std::mem::size_of::<MeshData>();
+            total_offset += mesh.vertex_size;
 
             mesh.index_offset = total_offset;
-            mesh.index_size = indices.len();
+            mesh.index_size = indices.len() * std::mem::size_of::<u32>();
 
             let mesh_file = format!("meshes/{}.mesh.json", uuid);
             std::fs::create_dir_all(std::path::Path::new(&mesh_file).parent().unwrap())?;
