@@ -10,18 +10,20 @@
 #include <span>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 template <typename T> using RefCounted = std::shared_ptr<T>;
 
-enum class UpdateFrequency {
+template <typename T> struct vectorHash {
+  size_t operator()(const std::vector<T> &vec) const noexcept {
+    size_t h = 0;
+    for (const auto &x : vec) {
 
-  FRAME,
-  OBJECT,
-  INSTANCE,
-
-
-
+      h ^= std::hash<T>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    }
+    return h;
+  }
 };
 
 struct DescriptorSetLayoutBuilder {
@@ -33,25 +35,6 @@ struct DescriptorSetLayoutBuilder {
   VkDescriptorSetLayout
   build(VkDevice device, VkShaderStageFlags shader_stages,
         VkDescriptorSetLayoutCreateFlags create_flags = 0);
-};
-
-struct DescriptorAllocator {
-
-  struct PoolSizeRatio {
-    VkDescriptorType type;
-    float ratio;
-  };
-
-  VkDescriptorPool pool;
-
-  void initPool(VkDevice device, uint32_t max_sets,
-                std::span<PoolSizeRatio> pool_ratios);
-
-  void clearDescriptors(VkDevice device);
-
-  void destroyPool(VkDevice device);
-
-  VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 };
 
 struct DescriptorAllocatorGrowable {
@@ -95,6 +78,11 @@ struct DescriptorWriter {
   void updateSet(VkDevice device, VkDescriptorSet set);
 };
 
+struct Descriptor {
+  VkDescriptorSetLayout layout;
+  VkDescriptorSet set;
+};
+
 struct Image {
   VkImage image;
   VkImageView view;
@@ -112,6 +100,7 @@ struct Buffer {
   VmaAllocation allocation;
   VmaAllocationInfo allocation_info;
   uint32_t size;
+  uint32_t current_offset = 0;
   std::vector<std::array<uint32_t, 2>> free_spaces = {};
 };
 
@@ -134,11 +123,33 @@ struct ResourceHandle {
   ResourceHandle(uint64_t idx, RefCounted<Resource> _ref)
       : idx(idx), ref(_ref) {}
 
-  uint64_t idx;
+  const uint64_t idx;
 
 private:
-  RefCounted<Resource> ref;
+  const RefCounted<Resource> ref;
 };
+
+struct CombinedResourceIndexAndDescriptorType {
+
+  size_t idx;
+  VkDescriptorType type;
+
+  bool operator==(const CombinedResourceIndexAndDescriptorType &other) const {
+
+    return (idx == other.idx && type == other.type);
+  }
+};
+
+namespace std {
+template <> struct hash<CombinedResourceIndexAndDescriptorType> {
+  size_t
+  operator()(const CombinedResourceIndexAndDescriptorType &x) const noexcept {
+    size_t h1 = std::hash<size_t>{}(x.idx);
+    size_t h2 = std::hash<int>{}(static_cast<int>(x.type));
+    return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+  }
+};
+} // namespace std
 
 class ResourceManager {
 
@@ -151,6 +162,10 @@ public:
   ResourceHandle createBuffer(size_t size, VkBufferUsageFlagBits usage_flags,
                               std::optional<std::string> name = std::nullopt);
 
+  // Writes to buffer, returns realignt Offset, if offset is uint32_max, uses current offset of buffer
+  uint32_t writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+                       uint32_t offset = UINT32_MAX);
+
   const VkDevice &_device;
   const VmaAllocator &_allocator;
 
@@ -158,16 +173,24 @@ public:
 
   void removeResource(size_t idx) { resources.erase(idx); }
 
+  Descriptor bindResources(
+      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind);
+
 private:
-  std::unordered_map<size_t, Resource> resources;
+  std::unordered_map<size_t, std::weak_ptr<Resource>> resources;
   std::unordered_map<std::string, size_t> resource_names;
 
   DescriptorAllocatorGrowable _dynamic_allocator;
 
-  VkDescriptorSetLayout _global_descriptor_set_layout;
-  VkDescriptorSet _global_descriptor_set;
-
   DescriptorWriter writer;
+
+  std::unordered_map<std::vector<CombinedResourceIndexAndDescriptorType>,
+                     Descriptor,
+                     vectorHash<CombinedResourceIndexAndDescriptorType>>
+      bound_descriptor_sets = {};
+  std::unordered_map<std::vector<VkDescriptorType>, std::vector<Descriptor>,
+                     vectorHash<VkDescriptorType>>
+      free_descriptor_sets = {};
 
   inline size_t getNextId() const {
     static size_t id = 0;

@@ -1,9 +1,14 @@
 #include "resources.h"
 #include "vulkan_macros.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <sys/types.h>
 #include <variant>
+#include <vector>
 #include <vulkan/vulkan_core.h>
+
+#include "vk_utils.h"
 
 void DescriptorSetLayoutBuilder::addBinding(uint32_t binding,
                                             VkDescriptorType type) {
@@ -116,6 +121,17 @@ void DescriptorAllocatorGrowable::clearPools(VkDevice device) {
   full_pools.clear();
 }
 
+void DescriptorAllocatorGrowable::destroyPools(VkDevice device) {
+  for (auto p : ready_pools) {
+    vkDestroyDescriptorPool(device, p, nullptr);
+  }
+  ready_pools.clear();
+  for (auto p : full_pools) {
+    vkDestroyDescriptorPool(device, p, nullptr);
+  }
+  full_pools.clear();
+}
+
 VkDescriptorSet DescriptorAllocatorGrowable::allocate(
     VkDevice device, VkDescriptorSetLayout layout, void *p_next) {
   VkDescriptorPool pool_to_use = getPool(device);
@@ -198,51 +214,6 @@ void DescriptorWriter::updateSet(VkDevice device, VkDescriptorSet set) {
   vkUpdateDescriptorSets(device, writes.size(), writes.data(), 0, nullptr);
 }
 
-void DescriptorAllocator::initPool(VkDevice device, uint32_t max_sets,
-                                   std::span<PoolSizeRatio> pool_ratios) {
-
-  std::vector<VkDescriptorPoolSize> pool_sizes = {};
-
-  for (PoolSizeRatio &ratio : pool_ratios) {
-    pool_sizes.push_back(VkDescriptorPoolSize{
-        ratio.type, static_cast<uint>(ratio.ratio * max_sets)});
-  }
-
-  VkDescriptorPoolCreateInfo create_info = {};
-  create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  create_info.flags = 0;
-  create_info.maxSets = max_sets;
-  create_info.poolSizeCount = pool_sizes.size();
-  create_info.pPoolSizes = pool_sizes.data();
-
-  VK_CHECK(vkCreateDescriptorPool(device, &create_info, nullptr, &pool),
-           "Create Descriptor Pool");
-}
-
-void DescriptorAllocator::clearDescriptors(VkDevice device) {
-
-  VK_CHECK(vkResetDescriptorPool(device, pool, 0), "Reset Descriptor Pool");
-}
-
-void DescriptorAllocator::destroyPool(VkDevice device) {
-  vkDestroyDescriptorPool(device, pool, nullptr);
-}
-
-VkDescriptorSet DescriptorAllocator::allocate(VkDevice device,
-                                              VkDescriptorSetLayout layout) {
-  VkDescriptorSetAllocateInfo alloc_info = {};
-  alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  alloc_info.descriptorPool = pool;
-  alloc_info.descriptorSetCount = 1;
-  alloc_info.pSetLayouts = &layout;
-
-  VkDescriptorSet set;
-  VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &set),
-           "Create Descriptor Set");
-
-  return set;
-}
-
 Resource::Resource(std::variant<Image, Buffer> v, ResourceManager *manager,
                    size_t idx)
     : resource_manager(manager), value(v), idx(idx) {}
@@ -285,13 +256,6 @@ ResourceManager::ResourceManager(VkDevice &device, VmaAllocator &allocator)
   };
 
   _dynamic_allocator.init(_device, 50, ratios);
-
-  DescriptorSetLayoutBuilder builder;
-  builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-  _global_descriptor_set_layout = builder.build(device, VK_SHADER_STAGE_ALL);
-
-  _global_descriptor_set =
-      _dynamic_allocator.allocate(_device, _global_descriptor_set_layout);
 }
 
 ResourceManager::~ResourceManager() {};
@@ -321,15 +285,123 @@ ResourceHandle ResourceManager::createBuffer(size_t size,
 
   size_t id = getNextId();
 
-  Resource new_resource(new_buffer, this, id);
+  RefCounted<Resource> ref_resource =
+      std::make_shared<Resource>(new_buffer, this, id);
 
-  resources.insert_or_assign(id, new_resource);
+  std::weak_ptr<Resource> weak_r = ref_resource;
 
-  ResourceHandle new_handle(id, std::make_shared<Resource>(new_resource));
+  resources.insert_or_assign(id, weak_r);
 
-  if (name != std::nullopt) {
+  ResourceHandle new_handle(id, ref_resource);
+
+  if (name.has_value()) {
     resource_names.insert_or_assign(name.value(), id);
   }
 
   return new_handle;
+}
+
+Descriptor ResourceManager::bindResources(
+    std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind) {
+
+  Descriptor set;
+
+  {
+    auto it = bound_descriptor_sets.find(resources_to_bind);
+
+    if (it != bound_descriptor_sets.end()) {
+
+      // Already bound
+      set = it->second;
+
+      return set;
+    }
+  }
+
+  std::vector<VkDescriptorType> searched_types(resources_to_bind.size());
+
+  {
+    size_t i = 0;
+    for (const auto &p : resources_to_bind) {
+
+      const size_t idx = p.idx;
+      const VkDescriptorType type = p.type;
+
+      auto r = resources[idx].lock();
+
+      if (!r) {
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+      }
+
+      searched_types[i++] = type;
+    }
+  }
+
+  auto it = free_descriptor_sets.find(searched_types);
+
+  if (it != free_descriptor_sets.end()) {
+
+    set = it->second[it->second.size() - 1];
+    it->second.pop_back();
+
+  } else {
+
+    DescriptorSetLayoutBuilder builder;
+
+    for (size_t i = 0; i < searched_types.size(); i++) {
+
+      builder.addBinding(i, searched_types[i]);
+    }
+    set.layout = builder.build(_device, VK_SHADER_STAGE_ALL);
+    set.set = _dynamic_allocator.allocate(_device, set.layout);
+  }
+
+  std::vector<VkWriteDescriptorSet> writes(resources_to_bind.size());
+
+  DescriptorWriter writer = {};
+
+  for (size_t i = 0; i < writes.size(); i++) {
+
+    auto &write = writes[i];
+
+    Resource *r = resources[resources_to_bind[i].idx].lock().get();
+
+    if (std::holds_alternative<Image>(r->value)) {
+
+      Image &img = std::get<Image>(r->value);
+
+      writer.writeImage(i, img.view, VK_NULL_HANDLE, img.current_layout,
+                        searched_types[i]);
+
+    } else {
+      Buffer &buf = std::get<Buffer>(r->value);
+
+      writer.writeBuffer(i, buf.buffer, buf.size, 0, searched_types[i]);
+    }
+  }
+
+  writer.updateSet(_device, set.set);
+
+  bound_descriptor_sets[resources_to_bind] = set;
+
+  return set;
+}
+
+uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
+                                      uint32_t size, uint32_t offset) {
+
+  auto weak_ref = resources.at(handle.idx);
+
+  if (weak_ref.expired()) {
+    std::cout << "Resource does not exist anymore\n";
+    return UINT32_MAX;
+  }
+
+  Resource &ref = *weak_ref.lock().get();
+
+  if (std::holds_alternative<Buffer>(ref.value) == false) {
+    std::cout << "Resource is not a buffer\n";
+
+    return UINT32_MAX;
+  }
 }

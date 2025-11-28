@@ -102,7 +102,7 @@ private:
 
   DeletionQueue<> _main_deletion_queue;
 
-  DescriptorAllocator _global_descriptor_allocator;
+  DescriptorAllocatorGrowable _global_descriptor_allocator;
 
   Image _draw_image;
 
