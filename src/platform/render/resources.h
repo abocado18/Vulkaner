@@ -4,6 +4,7 @@
 #include "platform/render/deletion_queue.h"
 #include "volk.h"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -87,11 +88,16 @@ struct Image {
   VkImage image;
   VkImageView view;
   VmaAllocation allocation;
+  VmaAllocationInfo allocation_info;
   VkFormat format;
+
+  VkImageAspectFlags aspect_mask;
 
   VkImageLayout current_layout;
 
   VkExtent3D extent;
+
+  uint32_t mip_map_number;
 };
 
 struct Buffer {
@@ -102,6 +108,8 @@ struct Buffer {
   uint32_t size;
   uint32_t current_offset = 0;
   std::vector<std::array<uint32_t, 2>> free_spaces = {};
+
+  VkBufferUsageFlagBits usage_flags;
 };
 
 class ResourceManager;
@@ -131,6 +139,9 @@ private:
 
 struct CombinedResourceIndexAndDescriptorType {
 
+  CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type)
+      : idx(idx), type(type) {}
+
   size_t idx;
   VkDescriptorType type;
 
@@ -151,10 +162,33 @@ template <> struct hash<CombinedResourceIndexAndDescriptorType> {
 };
 } // namespace std
 
+struct ResourceWriteInfo {
+
+  ResourceWriteInfo(const std::variant<Image, Buffer> _target,
+                    const std::array<uint32_t, 3> _offset,
+                    const Buffer _source_buffer)
+      : target(_target), target_offset(_offset), source_buffer(_source_buffer),
+        image_write_data({VK_IMAGE_LAYOUT_UNDEFINED}) {}
+
+  const std::variant<Image, Buffer> target;
+  const std::array<uint32_t, 3> target_offset;
+
+  const Buffer source_buffer;
+
+  struct ImageWriteData {
+    VkImageLayout new_layout;
+  } image_write_data;
+
+  struct BufferWriteData {
+    VkAccessFlags new_access;
+  } buffer_write_data;
+};
+
 class ResourceManager {
 
 public:
-  ResourceManager(VkDevice &device, VmaAllocator &allocator);
+  ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
+                  VmaAllocator &allocator);
   ~ResourceManager();
 
   DeletionQueue<ResourceManager> _deletion_queue;
@@ -162,9 +196,24 @@ public:
   ResourceHandle createBuffer(size_t size, VkBufferUsageFlagBits usage_flags,
                               std::optional<std::string> name = std::nullopt);
 
-  // Writes to buffer, returns realignt Offset, if offset is uint32_max, uses current offset of buffer
+  // Writes to buffer, returns realignt Offset, if offset is uint32_max, uses
+  // current offset of buffer
   uint32_t writeBuffer(ResourceHandle handle, void *data, uint32_t size,
-                       uint32_t offset = UINT32_MAX);
+                       uint32_t offset = UINT32_MAX,
+                       VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE);
+
+  void freeBuffer(ResourceHandle handle, uint32_t size, uint32_t offset);
+
+  ResourceHandle createImage(std::array<uint32_t, 3> extent,
+                             VkImageType image_type, VkFormat image_format,
+                             VkImageUsageFlagBits image_usage,
+                             VkImageViewType view_type,
+                             VkImageAspectFlags aspect_mask,
+                             bool create_mipmaps, uint32_t array_layers);
+
+  void writeImage(ResourceHandle handle, void *data, uint32_t size,
+                  std::array<uint32_t, 3> offset = {0, 0, 0},
+                  VkImageLayout new_layout = VK_IMAGE_LAYOUT_UNDEFINED);
 
   const VkDevice &_device;
   const VmaAllocator &_allocator;
@@ -175,6 +224,10 @@ public:
 
   Descriptor bindResources(
       std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind);
+
+  const std::vector<ResourceWriteInfo> &getWrites() const { return writes; }
+
+  void clearWrites() { writes.clear(); }
 
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources;
@@ -196,4 +249,8 @@ private:
     static size_t id = 0;
     return id++;
   }
+
+  VkPhysicalDeviceProperties _properties;
+
+  std::vector<ResourceWriteInfo> writes = {};
 };

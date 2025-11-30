@@ -2,6 +2,7 @@
 #include "GLFW/glfw3.h"
 #include "platform/render/allocator/vk_mem_alloc.h"
 #include "platform/render/pipeline.h"
+#include "platform/render/resources.h"
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
@@ -107,6 +108,8 @@ Renderer::~Renderer() {
       }
 
       vkDestroySemaphore(_device, _frames[i]._swapchain_semaphore, nullptr);
+      vkDestroySemaphore(_device, _frames[i]._transfer_semaphore, nullptr);
+      vkDestroySemaphore(_device, _frames[i]._compute_semaphore, nullptr);
 
       for (auto &s : _frames[i]._render_semaphores) {
         vkDestroySemaphore(_device, s, nullptr);
@@ -136,6 +139,11 @@ Renderer::~Renderer() {
 }
 
 void Renderer::initDescriptors() {
+
+  _resource_manager = new ResourceManager(_device, _chosen_gpu, _allocator);
+
+  _main_deletion_queue.pushFunction([&] { delete _resource_manager; });
+
   std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
   };
@@ -370,7 +378,8 @@ void Renderer::initDrawImage() {
 
     VkImageViewCreateInfo draw_img_view_create_info =
         vk_utils::imageViewCreateInfo(_draw_image.format, _draw_image.image,
-                                      VK_IMAGE_ASPECT_COLOR_BIT);
+                                      VK_IMAGE_ASPECT_COLOR_BIT,
+                                      VK_IMAGE_VIEW_TYPE_2D);
 
     VK_ERROR(vkCreateImageView(_device, &draw_img_view_create_info, nullptr,
                                &_draw_image.view),
@@ -386,13 +395,14 @@ void Renderer::initDrawImage() {
 
 void Renderer::initCommands() {
 
-  VkCommandPoolCreateInfo pool_create_info = {};
-  pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-  pool_create_info.queueFamilyIndex = _graphics_queue_family;
+  VkCommandPoolCreateInfo graphics_pool_create_info = {};
+  graphics_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  graphics_pool_create_info.flags =
+      VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  graphics_pool_create_info.queueFamilyIndex = _graphics_queue_family;
 
   for (size_t i = 0; i < FRAME_OVERLAP; i++) {
-    VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+    VK_ERROR(vkCreateCommandPool(_device, &graphics_pool_create_info, nullptr,
                                  &_frames[i]._graphics_command_pool),
              "Could not create Command Pool");
 
@@ -409,8 +419,15 @@ void Renderer::initCommands() {
   }
 
   if (_dedicated_compute) {
+
+    VkCommandPoolCreateInfo compute_pool_create_info = {};
+    compute_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    compute_pool_create_info.flags =
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    compute_pool_create_info.queueFamilyIndex = _compute_queue_family;
+
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
-      VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+      VK_ERROR(vkCreateCommandPool(_device, &compute_pool_create_info, nullptr,
                                    &_frames[i]._compute_command_pool),
                "Could not create Command Pool");
 
@@ -434,8 +451,16 @@ void Renderer::initCommands() {
   }
 
   if (_dedicated_transfer) {
+
+    VkCommandPoolCreateInfo transfer_pool_create_info = {};
+    transfer_pool_create_info.sType =
+        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    transfer_pool_create_info.flags =
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    transfer_pool_create_info.queueFamilyIndex = _transfer_queue_family;
+
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
-      VK_ERROR(vkCreateCommandPool(_device, &pool_create_info, nullptr,
+      VK_ERROR(vkCreateCommandPool(_device, &transfer_pool_create_info, nullptr,
                                    &_frames[i]._transfer_command_pool),
                "Could not create Command Pool");
 
@@ -486,6 +511,14 @@ void Renderer::initSyncStructures() {
     VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
                                &_frames[i]._swapchain_semaphore),
              "Could not create Swapchain Semaphore");
+
+    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                               &_frames[i]._transfer_semaphore),
+             "Could not create Transfer Semaphore");
+
+    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                               &_frames[i]._compute_semaphore),
+             "Could not create Transfer Semaphore");
   }
 }
 
@@ -499,6 +532,8 @@ void Renderer::draw() {
       return;
     }
   }
+
+  _resource_manager->runDeletionQueue();
 
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
                            UINT64_MAX),
@@ -534,12 +569,112 @@ void Renderer::draw() {
   VK_CHECK(vkResetCommandBuffer(compute_command_buffer, 0),
            "Compute Command Buffer");
 
-  VkCommandBufferBeginInfo begin_info = {};
-  begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  // Commands start here
 
-  VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer, &begin_info),
-           "Start Command Buffer");
+  {
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(transfer_command_buffer, &begin_info),
+             "Start Command Buffer");
+
+    for (const auto &w : _resource_manager->getWrites()) {
+
+      if (std::holds_alternative<Buffer>(w.target)) {
+
+        const Buffer &target_buffer = std::get<Buffer>(w.target);
+
+        VkBufferCopy region = {};
+        region.srcOffset = 0;
+        region.dstOffset = w.target_offset[0];
+        region.size = w.source_buffer.size;
+
+        vk_utils::transistionBuffer(transfer_command_buffer, VK_ACCESS_NONE,
+                                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                                    target_buffer.buffer);
+
+        vkCmdCopyBuffer(transfer_command_buffer, w.source_buffer.buffer,
+                        target_buffer.buffer, 1, &region);
+
+        vk_utils::transistionBuffer(
+            transfer_command_buffer, VK_ACCESS_TRANSFER_WRITE_BIT,
+            w.buffer_write_data.new_access, target_buffer.buffer,
+            _transfer_queue_family, _graphics_queue_family);
+
+      } else {
+
+        const Image &img = std::get<Image>(w.target);
+
+        VkBufferImageCopy region = {};
+        region.bufferOffset = 0;
+        region.imageExtent = img.extent;
+        region.imageOffset = {static_cast<int32_t>(w.target_offset[0]),
+                              static_cast<int32_t>(w.target_offset[1]),
+                              static_cast<int32_t>(w.target_offset[2])};
+        region.imageSubresource.aspectMask = img.aspect_mask;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.layerCount = 1;
+
+        vk_utils::transistionImage(
+            transfer_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, img.image);
+
+        vkCmdCopyBufferToImage(transfer_command_buffer, w.source_buffer.buffer,
+                               img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1, &region);
+
+        if (w.image_write_data.new_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+          vk_utils::transistionImage(
+              transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              w.image_write_data.new_layout, img.image, _transfer_queue_family,
+              _graphics_queue_family);
+        } else {
+          vk_utils::transistionImage(
+              transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_GENERAL, img.image, _transfer_queue_family,
+              _graphics_queue_family);
+        }
+      }
+    }
+
+    _resource_manager->_deletion_queue.pushFunction(
+        [](ResourceManager *manager) {
+          for (const auto &w : manager->getWrites()) {
+
+            vmaDestroyBuffer(manager->_allocator, w.source_buffer.buffer,
+                             w.source_buffer.allocation);
+          }
+
+          manager->clearWrites();
+        });
+
+    vkEndCommandBuffer(transfer_command_buffer);
+
+    VkSemaphoreSubmitInfo signal_info =
+        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                                      getCurrentFrame()._transfer_semaphore);
+
+    VkCommandBufferSubmitInfo command_buffer_submit_info =
+        vk_utils::commandBufferSubmitInfo(transfer_command_buffer);
+
+    VkSubmitInfo2 submit =
+        vk_utils::submitInfo(&command_buffer_submit_info,
+                             _dedicated_transfer ? &signal_info : nullptr,
+                             _dedicated_transfer ? 1 : 0, nullptr, 0);
+
+    vkQueueSubmit2(_transfer_queue, 1, &submit, 0);
+  }
+
+  {
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer, &begin_info),
+             "Start Command Buffer");
+  }
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
@@ -574,53 +709,44 @@ void Renderer::draw() {
                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                              _swapchain_images[swapchain_image_index]);
 
-  /*
-{
-// ImGUI
-
-VkRenderingAttachmentInfo imm_attachment_info = vk_utils::attachmentInfo(
-_swapchain_images_views[swapchain_image_index], nullptr,
-VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-VkRenderingInfo imm_rendering_info = vk_utils::renderingInfo(
-&imm_attachment_info, 1, _swapchain_extent, {0, 0}, nullptr, nullptr);
-
-vkCmdBeginRendering(graphics_command_buffer, &imm_rendering_info);
-
-ImGui_ImplVulkan_NewFrame();
-ImGui_ImplGlfw_NewFrame();
-ImGui::NewFrame();
-
-ImGui::ShowDemoWindow();
-
-ImGui::Render();
-ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
-         graphics_command_buffer);
-
-vkCmdEndRendering(graphics_command_buffer);
-}
-
-*/
-
   VK_CHECK(vkEndCommandBuffer(graphics_command_buffer), "End Command Buffer");
+  {
 
-  VkCommandBufferSubmitInfo command_submit_info =
-      vk_utils::commandBufferSubmitInfo(graphics_command_buffer);
+    VkCommandBufferSubmitInfo command_submit_info =
+        vk_utils::commandBufferSubmitInfo(graphics_command_buffer);
 
-  VkSemaphoreSubmitInfo wait_info = vk_utils::semaphoreSubmitInfo(
-      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-      getCurrentFrame()._swapchain_semaphore);
+    VkSemaphoreSubmitInfo wait_swapchain_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+        getCurrentFrame()._swapchain_semaphore);
 
-  VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
-      VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
-      getCurrentFrame()._render_semaphores[swapchain_image_index]);
+    VkSemaphoreSubmitInfo wait_transfer_info =
+        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
+                                      getCurrentFrame()._transfer_semaphore);
 
-  VkSubmitInfo2 submit_info =
-      vk_utils::submitInfo(&command_submit_info, &signal_info, &wait_info);
+    VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
+        getCurrentFrame()._render_semaphores[swapchain_image_index]);
 
-  VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info,
-                          getCurrentFrame()._render_fence),
-           "Submit Graphics Commands");
+    VkSubmitInfo2 submit_info;
+
+    if (_dedicated_transfer) {
+
+      VkSemaphoreSubmitInfo wait_infos[] = {wait_swapchain_info,
+                                            wait_transfer_info};
+
+      submit_info = vk_utils::submitInfo(&command_submit_info, &signal_info, 1,
+                                         wait_infos, 2);
+
+    } else {
+
+      submit_info = vk_utils::submitInfo(&command_submit_info, &signal_info, 1,
+                                         &wait_swapchain_info, 1);
+    }
+
+    VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info,
+                            getCurrentFrame()._render_fence),
+             "Submit Graphics Commands");
+  }
 
   VkPresentInfoKHR present_info = {};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -817,5 +943,3 @@ Buffer Renderer::createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
 void Renderer::destroyBuffer(const Buffer &buffer) {
   vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
 }
-
-

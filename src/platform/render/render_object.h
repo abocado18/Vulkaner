@@ -3,9 +3,20 @@
 #include <cstdint>
 
 struct RenderObject {
-  uint32_t index_count;
-  uint32_t first_index;
-  uint32_t first_vertex;
 
-  size_t transform_index;
+  size_t vertex_buffer_id;
+  uint32_t vertex_offset;
+
+  size_t transform_buffer_id;
+  uint32_t transform_offset;
+
+  uint32_t instance_count;
+
+  uint32_t index_count;
+  uint32_t index_offset;
+
+  size_t material_buffer_id;
+  uint32_t material_offset;
+
+  size_t pipeline_id;
 };

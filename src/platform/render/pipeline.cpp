@@ -19,8 +19,6 @@ void diagnoseIfNeeded(slang::IBlob *diagnosticsBlob) {
   }
 }
 
-
-
 PipelineManager::PipelineManager(const std::string path, VkDevice &device)
     : _device(device), _shader_path(path) {
 
@@ -139,8 +137,7 @@ bool PipelineManager::slangToSpv(const std::string &name,
 
   {
     Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    const char *moduleName = "shortest";
-    const char *modulePath = "shortest.slang";
+
     slang_module = _session->loadModule(name.c_str());
 
     diagnoseIfNeeded(diagnosticsBlob);

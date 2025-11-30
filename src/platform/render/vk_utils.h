@@ -13,6 +13,11 @@ void transistionImage(VkCommandBuffer cmd_buffer, VkImageLayout current_layout,
                       uint32_t src_queue_family = UINT32_MAX,
                       uint32_t dst_queue_family = UINT32_MAX);
 
+void transistionBuffer(VkCommandBuffer command_buffer,
+                       VkAccessFlags current_access, VkAccessFlags new_access,
+                       VkBuffer buffer, uint32_t src_queue_family = UINT32_MAX,
+                       uint32_t dst_queue_family = UINT32_MAX);
+
 VkImageSubresourceRange
 getImageSubResourceRange(VkImageAspectFlags aspect_mask);
 
@@ -22,14 +27,17 @@ VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask,
 VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd_buffer);
 
 VkSubmitInfo2 submitInfo(VkCommandBufferSubmitInfo *cmd,
-                         VkSemaphoreSubmitInfo *signal_semaphore_info,
-                         VkSemaphoreSubmitInfo *wait_semaphore_info);
+                         VkSemaphoreSubmitInfo *signal_semaphore_infos,
+                         uint32_t signal_semaphore_count,
+                         VkSemaphoreSubmitInfo *wait_semaphore_infos,
+                         uint32_t wait_semaphore_count);
 
 VkImageCreateInfo imageCreateInfo(VkFormat format,
                                   VkImageUsageFlags usage_flags, VkExtent3D);
 
 VkImageViewCreateInfo imageViewCreateInfo(VkFormat format, VkImage image,
-                                          VkImageAspectFlags aspect_flags);
+                                          VkImageAspectFlags aspect_flags,
+                                          VkImageViewType view_type);
 
 void copyImageToImage(VkCommandBuffer cmd, VkImage source, VkImage dst,
                       VkExtent2D src_size, VkExtent2D dst_size);
@@ -46,8 +54,5 @@ VkRenderingInfo renderingInfo(VkRenderingAttachmentInfo *color_attachments,
 VkPipelineShaderStageCreateInfo
 pipelineShaderStageCreateInfo(VkShaderStageFlagBits shader_stage,
                               VkShaderModule shader_module);
-
-
-                              
 
 } // namespace vk_utils

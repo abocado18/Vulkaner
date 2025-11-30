@@ -47,6 +47,31 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
   vkCmdPipelineBarrier2(cmd_buffer, &dep_info);
 }
 
+void vk_utils::transistionBuffer(VkCommandBuffer command_buffer,
+                                 VkAccessFlags current_access,
+                                 VkAccessFlags new_access, VkBuffer buffer,
+                                 uint32_t src_queue_family,
+                                 uint32_t dst_queue_family) {
+
+  VkBufferMemoryBarrier buffer_barrier = {};
+  buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+  buffer_barrier.buffer = buffer;
+  buffer_barrier.srcAccessMask = current_access;
+  buffer_barrier.dstAccessMask = new_access;
+  buffer_barrier.offset = 0;
+  buffer_barrier.size = VK_WHOLE_SIZE;
+  buffer_barrier.srcQueueFamilyIndex = src_queue_family == UINT32_MAX
+                                           ? VK_QUEUE_FAMILY_IGNORED
+                                           : src_queue_family;
+  buffer_barrier.dstQueueFamilyIndex = dst_queue_family == UINT32_MAX
+                                           ? VK_QUEUE_FAMILY_IGNORED
+                                           : dst_queue_family;
+
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                       VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1,
+                       &buffer_barrier, 0, nullptr);
+}
+
 VkImageSubresourceRange
 vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask) {
   VkImageSubresourceRange range = {};
@@ -87,19 +112,22 @@ vk_utils::semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask,
   return submit_info;
 }
 
-VkSubmitInfo2 vk_utils::submitInfo(VkCommandBufferSubmitInfo *cmd,
-                                   VkSemaphoreSubmitInfo *signal_semaphore_info,
-                                   VkSemaphoreSubmitInfo *wait_semaphore_info) {
+VkSubmitInfo2
+vk_utils::submitInfo(VkCommandBufferSubmitInfo *cmd,
+                     VkSemaphoreSubmitInfo *signal_semaphore_infos,
+                     uint32_t signal_semaphore_count,
+                     VkSemaphoreSubmitInfo *wait_semaphore_infos,
+                     uint32_t wait_semaphore_count) {
 
   VkSubmitInfo2 info = {};
   info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
   info.pNext = nullptr;
 
-  info.waitSemaphoreInfoCount = wait_semaphore_info == nullptr ? 0 : 1;
-  info.pWaitSemaphoreInfos = wait_semaphore_info;
+  info.waitSemaphoreInfoCount = wait_semaphore_count;
+  info.pWaitSemaphoreInfos = wait_semaphore_infos;
 
-  info.signalSemaphoreInfoCount = signal_semaphore_info == nullptr ? 0 : 1;
-  info.pSignalSemaphoreInfos = signal_semaphore_info;
+  info.signalSemaphoreInfoCount = signal_semaphore_count;
+  info.pSignalSemaphoreInfos = signal_semaphore_infos;
 
   info.commandBufferInfoCount = 1;
   info.pCommandBufferInfos = cmd;
@@ -176,11 +204,12 @@ void vk_utils::copyImageToImage(VkCommandBuffer cmd, VkImage source,
 
 VkImageViewCreateInfo
 vk_utils::imageViewCreateInfo(VkFormat format, VkImage image,
-                              VkImageAspectFlags aspect_flags) {
+                              VkImageAspectFlags aspect_flags,
+                              VkImageViewType view_type) {
   VkImageViewCreateInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 
-  info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  info.viewType = view_type;
   info.format = format;
   info.image = image;
 

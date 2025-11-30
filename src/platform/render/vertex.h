@@ -21,7 +21,7 @@ struct Vertex {
 
 static_assert(sizeof(Vertex) % 16 == 0);
 
-std::array<VkVertexInputAttributeDescription, 5>
+inline std::array<VkVertexInputAttributeDescription, 5>
 getVertexAttributeDescription() {
 
   std::array<VkVertexInputAttributeDescription, 5> descs = {};
@@ -54,7 +54,7 @@ getVertexAttributeDescription() {
   return descs;
 };
 
-VkVertexInputBindingDescription getVertexBindingDescription() {
+inline VkVertexInputBindingDescription getVertexBindingDescription() {
 
   VkVertexInputBindingDescription desc = {};
   desc.binding = 0;

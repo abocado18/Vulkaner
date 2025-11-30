@@ -1,12 +1,18 @@
 #include "resources.h"
 #include "vulkan_macros.h"
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <sys/types.h>
+#include <utility>
 #include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
+
+#include <cmath>
 
 #include "vk_utils.h"
 
@@ -243,7 +249,8 @@ Resource::~Resource() {
   resource_manager->removeResource(idx);
 }
 
-ResourceManager::ResourceManager(VkDevice &device, VmaAllocator &allocator)
+ResourceManager::ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
+                                 VmaAllocator &allocator)
     : _device(device), _allocator(allocator) {
 
   DescriptorAllocatorGrowable::PoolSizeRatio ratios[] = {
@@ -256,9 +263,14 @@ ResourceManager::ResourceManager(VkDevice &device, VmaAllocator &allocator)
   };
 
   _dynamic_allocator.init(_device, 50, ratios);
+
+  vkGetPhysicalDeviceProperties(_gpu, &_properties);
 }
 
-ResourceManager::~ResourceManager() {};
+ResourceManager::~ResourceManager() {
+
+  _dynamic_allocator.destroyPools(_device);
+};
 
 void ResourceManager::runDeletionQueue() { _deletion_queue.flush(this); }
 
@@ -273,8 +285,8 @@ ResourceHandle ResourceManager::createBuffer(size_t size,
   create_info.usage = usage_flags;
 
   VmaAllocationCreateInfo alloc_info = {};
-  alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-  alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
 
   Buffer new_buffer;
 
@@ -284,6 +296,11 @@ ResourceHandle ResourceManager::createBuffer(size_t size,
            "Could not create Buffer");
 
   size_t id = getNextId();
+
+  new_buffer.size = size;
+  new_buffer.current_offset = 0;
+  new_buffer.free_spaces.clear();
+  new_buffer.usage_flags = usage_flags;
 
   RefCounted<Resource> ref_resource =
       std::make_shared<Resource>(new_buffer, this, id);
@@ -388,7 +405,7 @@ Descriptor ResourceManager::bindResources(
 }
 
 uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
-                                      uint32_t size, uint32_t offset) {
+                                      uint32_t size, uint32_t offset, VkAccessFlags new_access) {
 
   auto weak_ref = resources.at(handle.idx);
 
@@ -404,4 +421,251 @@ uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
 
     return UINT32_MAX;
   }
+
+  Buffer &buf_ref = std::get<Buffer>(ref.value);
+
+  Buffer staging_buffer;
+
+  VkBufferCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  create_info.size = size;
+  create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+  vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
+                  &staging_buffer.allocation, &staging_buffer.allocation_info);
+
+  staging_buffer.current_offset = 0;
+  staging_buffer.size = 0;
+
+  std::memcpy(staging_buffer.allocation_info.pMappedData, data, size);
+
+  uint32_t allocated_offset = UINT32_MAX;
+
+  if (offset == UINT32_MAX) {
+
+    // Calculate aligned offset
+
+    // Buffer is either always bound as Uniform or Storage, not both for
+    // simplicity
+    bool is_uniform = buf_ref.usage_flags & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    bool is_storage = buf_ref.usage_flags & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+    if (buf_ref.free_spaces.empty())
+      buf_ref.free_spaces.push_back({0, buf_ref.size});
+
+    for (size_t i = 0; i < buf_ref.free_spaces.size(); i++) {
+
+      uint32_t range_start = buf_ref.free_spaces[i][0];
+      uint32_t range_end = buf_ref.free_spaces[i][1];
+
+      uint32_t alignment = 1;
+
+      if (is_uniform)
+        alignment = _properties.limits.minUniformBufferOffsetAlignment;
+
+      else if (is_storage)
+        alignment = _properties.limits.minStorageBufferOffsetAlignment;
+
+      uint32_t aligned = (range_start + alignment - 1) &
+                         ~(alignment - 1); // Align to correct offset
+
+      if (aligned + size > range_end) {
+        continue; // Not enough space lol
+      }
+
+      allocated_offset = aligned;
+
+      if (aligned == range_start) {
+        buf_ref.free_spaces[i][0] += size;
+      } else {
+        uint32_t old_end = range_end;
+
+        buf_ref.free_spaces[i][1] = aligned;
+
+        if (aligned + size < old_end) {
+          buf_ref.free_spaces.push_back({aligned + size, old_end});
+
+          std::sort(buf_ref.free_spaces.begin(), buf_ref.free_spaces.end());
+        }
+      }
+
+      if (buf_ref.free_spaces[i][0] >= buf_ref.free_spaces[i][1]) {
+        buf_ref.free_spaces[i] = buf_ref.free_spaces.back();
+        buf_ref.free_spaces.pop_back();
+      }
+
+      break;
+    }
+
+  } else {
+
+    // Assumes correct alignment
+    allocated_offset = offset;
+  }
+
+  if (allocated_offset == UINT32_MAX) {
+    // Not enough space
+    return UINT32_MAX;
+  }
+
+  ResourceWriteInfo info(resources.at(handle.idx).lock()->value,
+                         {allocated_offset}, staging_buffer);
+
+
+                         info.buffer_write_data = {new_access};
+
+  writes.push_back(info);
+
+  return allocated_offset;
+}
+
+void ResourceManager::freeBuffer(ResourceHandle handle, uint32_t size,
+                                 uint32_t offset) {
+
+  std::variant<Image, Buffer> &res = resources.at(handle.idx).lock()->value;
+
+  if (std::holds_alternative<Image>(res))
+    return;
+
+  Buffer &buf = std::get<Buffer>(res);
+
+  uint32_t start = offset;
+  uint32_t end = offset + size;
+
+  buf.free_spaces.push_back({start, end});
+
+  std::sort(buf.free_spaces.begin(), buf.free_spaces.end());
+
+  std::vector<std::array<uint32_t, 2>> merged;
+
+  for (size_t i = 1; i < buf.free_spaces.size(); i++) {
+    auto &last = merged.back();
+    auto &current = buf.free_spaces[i];
+
+    if (current[0] <= last[1]) {
+
+      last[1] = std::max(last[1], current[1]);
+    } else {
+      merged.push_back(current);
+    }
+  }
+
+  buf.free_spaces = std::move(merged);
+}
+
+ResourceHandle ResourceManager::createImage(
+    std::array<uint32_t, 3> extent, VkImageType image_type,
+    VkFormat image_format, VkImageUsageFlagBits image_usage,
+    VkImageViewType view_type, VkImageAspectFlags aspect_mask,
+    bool create_mipmaps, uint32_t array_layers) {
+
+  VkImageCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  create_info.imageType = image_type;
+  create_info.extent = {extent[0], extent[1], extent[2]};
+  create_info.mipLevels =
+      create_mipmaps ? static_cast<uint32_t>(std::floor(
+                           std::log2(std::max(extent[0], extent[1])))) +
+                           1
+                     : 1;
+
+  create_info.arrayLayers = array_layers;
+  create_info.format = image_format;
+  create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  create_info.usage = image_usage;
+  create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  alloc_info.priority = 1.0f;
+
+  Image image;
+
+  VK_ERROR(vmaCreateImage(_allocator, &create_info, &alloc_info, &image.image,
+                          &image.allocation, &image.allocation_info),
+           "Create Image");
+
+  image.current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+  image.extent = create_info.extent;
+  image.format = image_format;
+  image.mip_map_number = create_info.mipLevels;
+  image.aspect_mask = aspect_mask;
+
+  {
+    VkImageViewCreateInfo view_create_info = vk_utils::imageViewCreateInfo(
+        image_format, image.image, aspect_mask, view_type);
+
+    VK_ERROR(
+        vkCreateImageView(_device, &view_create_info, nullptr, &image.view),
+        "Create View");
+  }
+
+  uint32_t id = getNextId();
+
+  RefCounted<Resource> ref_resource =
+      std::make_shared<Resource>(image, this, id);
+
+  std::weak_ptr<Resource> weak_r = ref_resource;
+
+  resources.insert_or_assign(id, weak_r);
+
+  ResourceHandle new_handle(id, ref_resource);
+
+  return new_handle;
+}
+
+void ResourceManager::writeImage(ResourceHandle handle, void *data,
+                                 uint32_t size, std::array<uint32_t, 3> offset,
+                                 VkImageLayout new_layout) {
+
+  auto weak_ref = resources.at(handle.idx);
+
+  if (weak_ref.expired()) {
+    std::cout << "Resource does not exist anymore\n";
+    return;
+  }
+
+  Resource &ref = *weak_ref.lock().get();
+
+  if (std::holds_alternative<Image>(ref.value) == false) {
+    std::cout << "Resource is not am Image\n";
+
+    return;
+  }
+
+  Image &img_ref = std::get<Image>(ref.value);
+
+  Buffer staging_buffer;
+
+  VkBufferCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  create_info.size = size;
+  create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+  vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
+                  &staging_buffer.allocation, &staging_buffer.allocation_info);
+
+  staging_buffer.current_offset = 0;
+  staging_buffer.size = 0;
+
+  std::memcpy(staging_buffer.allocation_info.pMappedData, data, size);
+
+  ResourceWriteInfo write_info(resources.at(handle.idx).lock()->value, offset,
+                               staging_buffer);
+  write_info.image_write_data.new_layout =
+      new_layout != VK_IMAGE_LAYOUT_UNDEFINED ? new_layout
+                                              : VK_IMAGE_LAYOUT_UNDEFINED;
+
+  writes.push_back(write_info);
 }

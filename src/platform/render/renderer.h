@@ -35,7 +35,10 @@ struct FrameData {
   VkCommandBuffer _transfer_command_buffer;
 
   VkSemaphore _swapchain_semaphore;
+  VkSemaphore _transfer_semaphore;
+  VkSemaphore _compute_semaphore;
   std::vector<VkSemaphore> _render_semaphores;
+
   VkFence _render_fence;
 
   DeletionQueue<> _deletion_queue;
@@ -115,6 +118,8 @@ private:
   VkDescriptorPool _imm_pool;
 
   std::array<FrameData, FRAME_OVERLAP> _frames;
+
+  ResourceManager *_resource_manager;
 
   size_t _frame_number = 0;
 
