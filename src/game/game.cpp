@@ -9,6 +9,10 @@ game::Game::Game() : world() {
   time_data.total_ticks = 0;
 
   world.insertResource<Time>(time_data);
+
+  GameData game_data = {true};
+
+  world.insertResource<GameData>(game_data);
 }
 
 game::Game::~Game() {
@@ -45,4 +49,11 @@ void game::Game::tick() {
   world.executeCommands();
 
   world.update();
+}
+
+const bool game::Game::shouldRun() {
+
+  GameData *game_data = world.getResource<GameData>();
+
+  return game_data->should_run;
 }

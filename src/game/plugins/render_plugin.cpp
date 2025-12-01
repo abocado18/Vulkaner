@@ -9,13 +9,26 @@ void RenderPlugin::build(game::Game &game) {
 
   Renderer *r = new Renderer(1280, 720);
 
+  
+
   game.world.insertResource<Renderer *>(r);
 
-  game.world.addSystem<vecs::ResMut<Renderer *>>(
-      game.PostUpdate, [](auto view, vecs::Entity e, Renderer *r) {
+  game.world.addSystem<vecs::ResMut<Renderer *>, vecs::ResMut<game::GameData>>(
+      game.PostUpdate, [](auto view, vecs::Entity e, Renderer *r, game::GameData &game_data) {
         std::vector<RenderObject> render_objects = {};
 
+        
+        if(r->shouldUpdate() == false) {
+          game_data.should_run = false;
+        }
+        
+        
         r->draw(render_objects);
+
+
+
+
+
       });
 
   game.world.addSystem<vecs::ResMut<Renderer *>, vecs::ResMut<vecs::Commands>>(

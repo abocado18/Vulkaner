@@ -48,8 +48,17 @@ struct FrameData {
 constexpr uint32_t FRAME_OVERLAP = 2;
 
 
+class IRenderer {
 
-class Renderer {
+
+  virtual void draw(std::vector<RenderObject> &render_objects);
+
+
+
+};
+
+
+class Renderer : IRenderer {
 public:
   Renderer(uint32_t width, uint32_t height);
   ~Renderer();

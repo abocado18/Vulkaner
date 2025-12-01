@@ -21,7 +21,7 @@ int main() {
     gameplay.addPlugin(render_plugin);
   }
 
-  while (true) {
+  while (gameplay.shouldRun()) {
 
     gameplay.tick();
   }

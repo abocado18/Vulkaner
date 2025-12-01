@@ -18,6 +18,14 @@ struct Time {
   uint64_t total_ticks;
 };
 
+
+//Global Data for Game
+struct GameData {
+
+  bool should_run;
+
+};
+
 class Game {
 public:
   Game();
@@ -28,6 +36,8 @@ public:
   void runStartup();
 
   void addPlugin(IPlugin &p) { p.build(*this); }
+
+  const bool shouldRun();
 
   vecs::Ecs world;
 
