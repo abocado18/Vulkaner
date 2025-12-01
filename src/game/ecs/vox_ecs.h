@@ -441,8 +441,6 @@ public:
 
     SparseSet<T> &set = getOrCreateSparseSet<T>();
 
-   
-
     uint32_t comp_index = getTypeId<T>();
 
     if (e >= entity_what_components.size())
@@ -527,11 +525,12 @@ public:
 
     if (!resources[id]) {
       resources[id] = new ResourceData<T>(data);
+    } else {
+
+      ResourceData<T> &ref = *static_cast<ResourceData<T> *>(resources[id]);
+
+      ref.data = data;
     }
-
-    ResourceData<T> &ref = *static_cast<ResourceData<T> *>(resources[id]);
-
-    ref.data = data;
   }
 
   template <typename... Ts, typename Func>

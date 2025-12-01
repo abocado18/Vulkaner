@@ -2,27 +2,20 @@
 #include "ecs/vox_ecs.h"
 #include <chrono>
 
-
-
-
-
-game::Game::Game()
-    :  world() {
-
-
+game::Game::Game() : world() {
 
   time_data.delta_time = 0.0f;
   time_data.total_time = 0.0f;
   time_data.total_ticks = 0;
 
   world.insertResource<Time>(time_data);
-
- 
-
-  
 }
 
-game::Game::~Game() {}
+game::Game::~Game() {
+  world.runSchedule(OnClose);
+
+  world.executeCommands();
+}
 
 void game::Game::runStartup() { world.runSchedule(Startup); }
 

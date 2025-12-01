@@ -37,6 +37,8 @@ public:
   vecs::Schedule Update = {};
   vecs::Schedule PostUpdate = {};
 
+  vecs::Schedule OnClose = {};
+
 private:
   Time time_data = {};
 
