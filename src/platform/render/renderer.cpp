@@ -397,8 +397,6 @@ void Renderer::initCommands() {
 
   VkCommandPoolCreateInfo graphics_pool_create_info = {};
   graphics_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  graphics_pool_create_info.flags =
-      VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   graphics_pool_create_info.queueFamilyIndex = _graphics_queue_family;
 
   for (size_t i = 0; i < FRAME_OVERLAP; i++) {
@@ -422,8 +420,6 @@ void Renderer::initCommands() {
 
     VkCommandPoolCreateInfo compute_pool_create_info = {};
     compute_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    compute_pool_create_info.flags =
-        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     compute_pool_create_info.queueFamilyIndex = _compute_queue_family;
 
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
@@ -446,7 +442,17 @@ void Renderer::initCommands() {
 
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
       _frames[i]._compute_command_pool = _frames[i]._graphics_command_pool;
-      _frames[i]._compute_command_buffer = _frames[i]._graphics_command_buffer;
+
+      VkCommandBufferAllocateInfo alloc_info = {};
+
+      alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      alloc_info.commandBufferCount = 1;
+      alloc_info.commandPool = _frames[i]._compute_command_pool;
+      alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+      VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
+                                        &_frames[i]._transfer_command_buffer),
+               "Could not allocate Command Buffer");
     }
   }
 
@@ -455,8 +461,6 @@ void Renderer::initCommands() {
     VkCommandPoolCreateInfo transfer_pool_create_info = {};
     transfer_pool_create_info.sType =
         VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    transfer_pool_create_info.flags =
-        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     transfer_pool_create_info.queueFamilyIndex = _transfer_queue_family;
 
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
@@ -479,7 +483,17 @@ void Renderer::initCommands() {
 
     for (size_t i = 0; i < FRAME_OVERLAP; i++) {
       _frames[i]._transfer_command_pool = _frames[i]._graphics_command_pool;
-      _frames[i]._transfer_command_buffer = _frames[i]._graphics_command_buffer;
+
+      VkCommandBufferAllocateInfo alloc_info = {};
+
+      alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      alloc_info.commandBufferCount = 1;
+      alloc_info.commandPool = _frames[i]._transfer_command_pool;
+      alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+      VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
+                                        &_frames[i]._transfer_command_buffer),
+               "Could not allocate Command Buffer");
     }
   }
 }
@@ -562,12 +576,23 @@ void Renderer::draw() {
   VkCommandBuffer compute_command_buffer =
       getCurrentFrame()._compute_command_buffer;
 
-  VK_CHECK(vkResetCommandBuffer(graphics_command_buffer, 0),
-           "Graphics Command Buffer");
-  VK_CHECK(vkResetCommandBuffer(transfer_command_buffer, 0),
-           "Transfer Command Buffer");
-  VK_CHECK(vkResetCommandBuffer(compute_command_buffer, 0),
-           "Compute Command Buffer");
+  VK_CHECK(
+      vkResetCommandPool(_device, getCurrentFrame()._graphics_command_pool, 0),
+      "Graphics Command Buffer");
+
+  if (_dedicated_compute) {
+    VK_CHECK(vkResetCommandPool(_device,
+                                getCurrentFrame()._compute_command_pool, 0),
+             "Graphics Command Buffer");
+  }
+
+  if (_dedicated_transfer) {
+    VK_CHECK(vkResetCommandPool(_device,
+                                getCurrentFrame()._transfer_command_pool, 0),
+             "Graphics Command Buffer");
+  }
+
+  
 
   // Commands start here
 
@@ -600,7 +625,8 @@ void Renderer::draw() {
         vk_utils::transistionBuffer(
             transfer_command_buffer, VK_ACCESS_TRANSFER_WRITE_BIT,
             w.buffer_write_data.new_access, target_buffer.buffer,
-            _transfer_queue_family, _graphics_queue_family);
+            _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
+            _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
 
       } else {
 
@@ -625,17 +651,11 @@ void Renderer::draw() {
                                img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                1, &region);
 
-        if (w.image_write_data.new_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
-          vk_utils::transistionImage(
-              transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-              w.image_write_data.new_layout, img.image, _transfer_queue_family,
-              _graphics_queue_family);
-        } else {
-          vk_utils::transistionImage(
-              transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-              VK_IMAGE_LAYOUT_GENERAL, img.image, _transfer_queue_family,
-              _graphics_queue_family);
-        }
+        vk_utils::transistionImage(
+            transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            w.image_write_data.new_layout, img.image,
+            _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
+            _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
       }
     }
 
@@ -664,7 +684,8 @@ void Renderer::draw() {
                              _dedicated_transfer ? &signal_info : nullptr,
                              _dedicated_transfer ? 1 : 0, nullptr, 0);
 
-    vkQueueSubmit2(_transfer_queue, 1, &submit, 0);
+    VK_CHECK(vkQueueSubmit2(_transfer_queue, 1, &submit, 0),
+             "Submit Transfer Commands");
   }
 
   {

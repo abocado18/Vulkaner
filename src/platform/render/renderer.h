@@ -44,7 +44,7 @@ struct FrameData {
   DeletionQueue<> _deletion_queue;
 };
 
-constexpr uint32_t FRAME_OVERLAP = 2;
+constexpr uint32_t FRAME_OVERLAP = 1;
 
 
 

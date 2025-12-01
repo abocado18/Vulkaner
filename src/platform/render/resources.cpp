@@ -405,7 +405,8 @@ Descriptor ResourceManager::bindResources(
 }
 
 uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
-                                      uint32_t size, uint32_t offset, VkAccessFlags new_access) {
+                                      uint32_t size, uint32_t offset,
+                                      VkAccessFlags new_access) {
 
   auto weak_ref = resources.at(handle.idx);
 
@@ -516,8 +517,7 @@ uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
   ResourceWriteInfo info(resources.at(handle.idx).lock()->value,
                          {allocated_offset}, staging_buffer);
 
-
-                         info.buffer_write_data = {new_access};
+  info.buffer_write_data = {new_access};
 
   writes.push_back(info);
 
@@ -663,9 +663,7 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
 
   ResourceWriteInfo write_info(resources.at(handle.idx).lock()->value, offset,
                                staging_buffer);
-  write_info.image_write_data.new_layout =
-      new_layout != VK_IMAGE_LAYOUT_UNDEFINED ? new_layout
-                                              : VK_IMAGE_LAYOUT_UNDEFINED;
+  write_info.image_write_data.new_layout = new_layout;
 
   writes.push_back(write_info);
 }

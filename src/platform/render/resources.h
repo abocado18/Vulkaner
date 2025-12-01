@@ -213,7 +213,7 @@ public:
 
   void writeImage(ResourceHandle handle, void *data, uint32_t size,
                   std::array<uint32_t, 3> offset = {0, 0, 0},
-                  VkImageLayout new_layout = VK_IMAGE_LAYOUT_UNDEFINED);
+                  VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
 
   const VkDevice &_device;
   const VmaAllocator &_allocator;
