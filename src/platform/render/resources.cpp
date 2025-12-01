@@ -667,3 +667,42 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
 
   writes.push_back(write_info);
 }
+
+const Buffer &ResourceManager::getBuffer(size_t idx) {
+
+  auto weak_r = resources.at(idx);
+
+  if (weak_r.expired()) {
+    std::cerr << "No valid Buffer, is expired\n";
+    std::abort();
+  }
+
+  const Resource &resource = *weak_r.lock().get();
+
+  if (std::holds_alternative<Buffer>(resource.value)) {
+
+    return std::get<Buffer>(resource.value);
+  }
+
+  std::cerr << "Not a Buffer\n";
+  std::abort();
+}
+
+const Image &ResourceManager::getImage(size_t idx) {
+  auto weak_r = resources.at(idx);
+
+  if (weak_r.expired()) {
+    std::cerr << "No valid Image, is expired\n";
+    std::abort();
+  }
+
+  const Resource &resource = *weak_r.lock().get();
+
+  if (std::holds_alternative<Image>(resource.value)) {
+
+    return std::get<Image>(resource.value);
+  }
+
+  std::cerr << "Not a Buffer\n";
+  std::abort();
+}

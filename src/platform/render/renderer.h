@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform/render/pipeline.h"
+#include "platform/render/render_object.h"
 #include "volk.h"
 #include <array>
 #include <cstddef>
@@ -44,7 +45,7 @@ struct FrameData {
   DeletionQueue<> _deletion_queue;
 };
 
-constexpr uint32_t FRAME_OVERLAP = 1;
+constexpr uint32_t FRAME_OVERLAP = 2;
 
 
 
@@ -57,7 +58,7 @@ public:
     return !glfwWindowShouldClose(_window_handle);
   }
 
-  void draw();
+  void draw(std::vector<RenderObject> &render_objects);
 
   // Move to Resources later
   Buffer createBuffer(size_t alloc_size, VkBufferUsageFlags usage,

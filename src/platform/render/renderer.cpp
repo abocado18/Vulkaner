@@ -2,6 +2,7 @@
 #include "GLFW/glfw3.h"
 #include "platform/render/allocator/vk_mem_alloc.h"
 #include "platform/render/pipeline.h"
+#include "platform/render/render_object.h"
 #include "platform/render/resources.h"
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
@@ -536,7 +537,7 @@ void Renderer::initSyncStructures() {
   }
 }
 
-void Renderer::draw() {
+void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
   glfwPollEvents();
 
@@ -581,9 +582,9 @@ void Renderer::draw() {
       "Graphics Command Buffer");
 
   if (_dedicated_compute) {
-    VK_CHECK(vkResetCommandPool(_device,
-                                getCurrentFrame()._compute_command_pool, 0),
-             "Graphics Command Buffer");
+    VK_CHECK(
+        vkResetCommandPool(_device, getCurrentFrame()._compute_command_pool, 0),
+        "Graphics Command Buffer");
   }
 
   if (_dedicated_transfer) {
@@ -592,9 +593,9 @@ void Renderer::draw() {
              "Graphics Command Buffer");
   }
 
-  
-
   // Commands start here
+
+#pragma region Write Buffer/Image
 
   {
     VkCommandBufferBeginInfo begin_info = {};
@@ -688,6 +689,8 @@ void Renderer::draw() {
              "Submit Transfer Commands");
   }
 
+#pragma endregion
+
   {
     VkCommandBufferBeginInfo begin_info = {};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -699,6 +702,28 @@ void Renderer::draw() {
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
+
+  for (size_t i = 0; i < render_objects.size(); i++) {
+
+    const auto &m = render_objects[i];
+
+    // vkCmdBindPipeline(graphics_command_buffer,
+    // VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline_manager.)
+
+    VkDeviceSize vertex_offset = m.vertex_offset;
+
+    const Buffer &vertex_index_buffer =
+        _resource_manager->getBuffer(m.vertex_buffer_id);
+
+    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1,
+                           &vertex_index_buffer.buffer, &vertex_offset);
+
+    vkCmdBindIndexBuffer(graphics_command_buffer, vertex_index_buffer.buffer,
+                         m.index_offset, VK_INDEX_TYPE_UINT32);
+
+    vkCmdDrawIndexed(graphics_command_buffer, m.index_count, m.instance_count,
+                     0, 0, 0);
+  }
 
   drawBackground(graphics_command_buffer);
 

@@ -215,6 +215,12 @@ public:
                   std::array<uint32_t, 3> offset = {0, 0, 0},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
 
+  
+  const Image &getImage(size_t idx);
+  const Buffer &getBuffer(size_t idx);
+
+
+
   const VkDevice &_device;
   const VmaAllocator &_allocator;
 

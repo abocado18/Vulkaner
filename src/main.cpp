@@ -1,9 +1,11 @@
 #include <iostream>
+#include <vector>
 
 #include "main.h"
 
 #include "game/game.h"
 #include "game/plugins/scene_plugin.h"
+#include "platform/render/render_object.h"
 #include "platform/render/renderer.h"
 
 int main() {
@@ -21,7 +23,8 @@ int main() {
 
   while (renderer.shouldUpdate()) {
 
-    renderer.draw();
+    std::vector<RenderObject> draws {};
+    renderer.draw(draws); 
   }
 
   return 0;
