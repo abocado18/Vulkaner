@@ -391,7 +391,8 @@ public:
 
       } else {
 
-        // Is Smallest Set, No need to check if Entity has Component because we get it from the samllest T sparse set
+        // Is Smallest Set, No need to check if Entity has Component because we
+        // get it from the samllest T sparse set
 
         if constexpr (is_read_or_write<T>::value && isMarkedAdded<T>::value) {
 
@@ -495,13 +496,12 @@ public:
              ? getOrCreateSparseSet<component_t<Ts>>().dense.size()
              : SIZE_MAX)...};
 
-    size_t smallest_index = 0;
-    size_t smallest_size = dense_sizes[0];
-
-    auto data_tuple = std::tuple<Ts...>();
+    size_t smallest_index = SIZE_MAX;
+    size_t smallest_size = SIZE_MAX;
 
     for (size_t i = 0; i < sizeof...(Ts); i++) {
-      if (dense_sizes[i] < smallest_size) {
+
+      if (dense_sizes[i] < smallest_size && dense_sizes[i] != SIZE_MAX) {
         smallest_index = i;
         smallest_size = dense_sizes[i];
       }
@@ -524,6 +524,8 @@ public:
                   &getOrCreateSparseSet<component_t<Ts>>(), smallest_index,
                   func);
             }
+          } else {
+            count++;
           }
         }(),
         ...);

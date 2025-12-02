@@ -21,9 +21,9 @@ void ScenePlugin::build(game::Game &game) {
   std::cout << "Initialize Scene Plugin\n";
 
 
-  /*
+  
   game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>,
-                       Read<LoadSceneName>>(
+                       Added<Read<LoadSceneName>>>(
       game.Update, [](auto view, Entity e, Commands &cmd, Renderer *renderer,
                       const LoadSceneName &load) {
         const std::string &file_path = load.load_scene;
@@ -160,7 +160,7 @@ void ScenePlugin::build(game::Game &game) {
             if (it == loaded_meshes.end()) {
 
               const std::string mesh_path =
-                  file_path + "/meshes/" + m.mesh + "/mesh.json";
+                  file_path + "meshes/" + m.mesh + ".mesh.json";
 
               json mesh_json;
 
@@ -184,7 +184,7 @@ void ScenePlugin::build(game::Game &game) {
               size_t index_size = mesh_json["index_size"].get<size_t>();
 
               std::vector<uint8_t> bin_data = loadBinaryFile(
-                  file_path + "/meshes/" + m.mesh + ".mesh_data.bin");
+                  file_path + "meshes/" + m.mesh + ".mesh_data.bin");
 
               if (bin_data.size() == 0) {
                 std::cerr << "Corrupt Mesh Data\n";
@@ -201,15 +201,9 @@ void ScenePlugin::build(game::Game &game) {
           }
         }
       });
-      */
+      
 
-      game.world.addSystem<Added<Read<LoadSceneName>>>(game.Update, [](auto view, Entity e,const LoadSceneName &name) {
-
-
-        std::cout << name.load_scene << " " << "ss\n" << e << std::endl;;
-
-
-      });
+   
 
   game.world.addSystem<ResMut<Commands>>(
       game.Startup, [](auto view, Entity e, Commands &cmd) {
