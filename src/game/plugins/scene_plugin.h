@@ -19,16 +19,19 @@ using json = nlohmann::json;
 namespace SceneFormatStructs
 {
 
+
+  using uuid = std::string;
+
   struct MeshRenderer
   {
-    std::string mesh;
-    std::string material;
+    uuid mesh;
+    uuid material;
   };
 
 
   struct Entity
   {
-    std::string id;
+    uuid id;
     std::string name;
     
     Vec3<float> position;
@@ -40,12 +43,12 @@ namespace SceneFormatStructs
 
   struct Material 
   {
-    std::string id;
+    uuid id;
     std::string name;
-    std::string albedo_texture;
-    std::string normal_texture;
-    std::string metallic_roughness_texture;
-    std::string emissive_texture;
+    uuid albedo_texture;
+    uuid normal_texture;
+    uuid metallic_roughness_texture;
+    uuid emissive_texture;
 
     std::array<float, 3> albedo_color;
     float metallic;
@@ -54,6 +57,17 @@ namespace SceneFormatStructs
 
     std::string custom_material_data;
   };
+}
+
+namespace SceneAssetStructs {
+
+
+  struct Mesh {
+    uint32_t vertex_offset;
+    uint32_t index_offset;
+    uint32_t index_number;
+  };
+
 }
 
 

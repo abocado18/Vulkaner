@@ -2,6 +2,7 @@
 
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/plugins/render_plugin.h"
 #include "game/required_components/name.h"
 #include "game/required_components/transform.h"
 #include "platform/math/math.h"
@@ -13,6 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
 using namespace vecs;
 
@@ -20,12 +22,10 @@ void ScenePlugin::build(game::Game &game) {
 
   std::cout << "Initialize Scene Plugin\n";
 
-
-  
-  game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>,
+  game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>, Res<RenderBuffers>,
                        Added<Read<LoadSceneName>>>(
       game.Update, [](auto view, Entity e, Commands &cmd, Renderer *renderer,
-                      const LoadSceneName &load) {
+                      RenderBuffers &render_buffers, const LoadSceneName &load) {
         const std::string &file_path = load.load_scene;
 
         std::cout << "Load Scene " << file_path << "\n";
@@ -81,6 +81,8 @@ void ScenePlugin::build(game::Game &game) {
           file.close();
         }
 
+        #pragma region Entities
+
         std::vector<SceneFormatStructs::Entity> entities = {};
 
         for (auto &e : entities_json) {
@@ -113,10 +115,12 @@ void ScenePlugin::build(game::Game &game) {
           entities.push_back(entity);
         }
 
+        #pragma endregion
+
         std::unordered_map<std::string, uint64_t> loaded_images = {};
         std::unordered_map<std::string, SceneFormatStructs::Material>
             loaded_materials = {};
-        std::unordered_map<std::string, uint64_t> loaded_meshes = {};
+        std::unordered_map<SceneFormatStructs::uuid, uint64_t> loaded_meshes = {};
 
         for (auto &e : entities) {
 
@@ -157,6 +161,7 @@ void ScenePlugin::build(game::Game &game) {
 
             auto it = loaded_meshes.find(m.mesh);
 
+            // Check if already loaded
             if (it == loaded_meshes.end()) {
 
               const std::string mesh_path =
@@ -178,10 +183,12 @@ void ScenePlugin::build(game::Game &game) {
                 continue;
               }
 
-              size_t vertex_offset = mesh_json["vertex_offset"].get<size_t>();
-              size_t index_offset = mesh_json["index_offset"].get<size_t>();
-              size_t vertex_size = mesh_json["vertex_size"].get<size_t>();
-              size_t index_size = mesh_json["index_size"].get<size_t>();
+              size_t file_vertex_offset =
+                  mesh_json["vertex_offset"].get<size_t>(); //Is always 0
+              size_t file_index_offset =
+                  mesh_json["index_offset"].get<size_t>();
+              size_t file_vertex_size = mesh_json["vertex_size"].get<size_t>();
+              size_t file_index_size = mesh_json["index_size"].get<size_t>();
 
               std::vector<uint8_t> bin_data = loadBinaryFile(
                   file_path + "meshes/" + m.mesh + ".mesh_data.bin");
@@ -191,23 +198,39 @@ void ScenePlugin::build(game::Game &game) {
                 continue;
               }
 
-              std::span<uint8_t> vertex_data =
-                  std::span(bin_data.begin() + vertex_offset, vertex_size);
-              std::span<uint8_t> index_data =
-                  std::span(bin_data.begin() + index_offset, index_size);
-
               // Upload GPU data here
+              auto vertex_handle = render_buffers.data.at(BufferType::Vertex);
+              uint32_t gpu_vertex_offset =
+                  renderer->writeBuffer(vertex_handle, bin_data.data(),
+                                        sizeof(uint8_t) * bin_data.size(),
+                                        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+                                            VK_ACCESS_INDEX_READ_BIT);
+
+              
+
+              cmd.push([gpu_vertex_offset, file_index_offset, file_index_size](Ecs *world) {
+
+
+
+                Entity e = world->createEntity();
+
+
+                SceneAssetStructs::Mesh mesh = {};
+                mesh.vertex_offset = gpu_vertex_offset;
+                mesh.index_offset = gpu_vertex_offset + file_index_offset;
+                mesh.index_number = file_index_size;
+
+                world->addComponent<SceneAssetStructs::Mesh>(e, mesh);
+
+              });
+
             }
           }
         }
       });
-      
-
-   
 
   game.world.addSystem<ResMut<Commands>>(
       game.Startup, [](auto view, Entity e, Commands &cmd) {
-
         std::cout << "Load Test Scene\n";
         cmd.push([](Ecs *world) {
           Entity e = world->createEntity();

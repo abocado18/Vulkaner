@@ -31,9 +31,9 @@ void RenderPlugin::build(game::Game &game) {
       r->createBuffer(1'000'000, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
-  render_buffers.data["Vertex"] = vertex_handle;
-  render_buffers.data["Transform"] = transform_handle;
-  render_buffers.data["Material"] = material_handle;
+  render_buffers.data[BufferType::Vertex] = vertex_handle;
+  render_buffers.data[BufferType::Transform] = transform_handle;
+  render_buffers.data[BufferType::Material] = material_handle;
 
   game.world.insertResource<RenderBuffers>(render_buffers);
 
