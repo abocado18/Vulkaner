@@ -969,7 +969,7 @@ ResourceHandle Renderer::createBuffer(size_t size,
   return _resource_manager->createBuffer(size, usage_flags);
 }
 
-uint32_t Renderer::writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+BufferHandle Renderer::writeBuffer(ResourceHandle handle, void *data, uint32_t size,
                                uint32_t offset,
                                VkAccessFlags new_buffer_access_flags) {
 

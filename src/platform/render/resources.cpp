@@ -249,6 +249,22 @@ Resource::~Resource() {
   resource_manager->removeResource(idx);
 }
 
+BufferSpace::BufferSpace(std::array<uint32_t, 2> space,
+                         ResourceHandle buffer_handle, ResourceManager *manager)
+    : values(space), buffer_handle(buffer_handle), manager(manager) {}
+
+BufferSpace::~BufferSpace() {
+
+  auto v0 = values[0];
+  auto v1 = values[1];
+  auto bh = buffer_handle;
+
+  manager->_deletion_queue.pushFunction([bh, v0, v1](ResourceManager *manager) {
+    std::array<uint32_t, 2> free = {v0, v1};
+    manager->freeBuffer(bh, free);
+  });
+}
+
 ResourceManager::ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
                                  VmaAllocator &allocator)
     : _device(device), _allocator(allocator) {
@@ -404,15 +420,15 @@ Descriptor ResourceManager::bindResources(
   return set;
 }
 
-uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
-                                      uint32_t size, uint32_t offset,
-                                      VkAccessFlags new_access) {
+BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
+                                          uint32_t size, uint32_t offset,
+                                          VkAccessFlags new_access) {
 
   auto weak_ref = resources.at(handle.idx);
 
   if (weak_ref.expired()) {
     std::cout << "Resource does not exist anymore\n";
-    return UINT32_MAX;
+    return {};
   }
 
   Resource &ref = *weak_ref.lock().get();
@@ -420,7 +436,7 @@ uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
   if (std::holds_alternative<Buffer>(ref.value) == false) {
     std::cout << "Resource is not a buffer\n";
 
-    return UINT32_MAX;
+    return {};
   }
 
   Buffer &buf_ref = std::get<Buffer>(ref.value);
@@ -511,7 +527,8 @@ uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
 
   if (allocated_offset == UINT32_MAX) {
     // Not enough space
-    return UINT32_MAX;
+    vmaDestroyBuffer(_allocator, buf_ref.buffer, buf_ref.allocation);
+    return {};
   }
 
   ResourceWriteInfo info(resources.at(handle.idx).lock()->value,
@@ -521,11 +538,19 @@ uint32_t ResourceManager::writeBuffer(ResourceHandle handle, void *data,
 
   writes.push_back(info);
 
-  return allocated_offset;
+  std::array<uint32_t, 2> free_array_space = {allocated_offset,
+                                              allocated_offset + size};
+
+  RefCounted<BufferSpace> used_buffer_space =
+      std::make_shared<BufferSpace>(free_array_space, handle, this);
+
+  BufferHandle buffer_handle(handle.idx, used_buffer_space);
+
+  return buffer_handle;
 }
 
-void ResourceManager::freeBuffer(ResourceHandle handle, uint32_t size,
-                                 uint32_t offset) {
+void ResourceManager::freeBuffer(ResourceHandle handle,
+                                 std::array<uint32_t, 2> free_space) {
 
   std::variant<Image, Buffer> &res = resources.at(handle.idx).lock()->value;
 
@@ -534,8 +559,8 @@ void ResourceManager::freeBuffer(ResourceHandle handle, uint32_t size,
 
   Buffer &buf = std::get<Buffer>(res);
 
-  uint32_t start = offset;
-  uint32_t end = offset + size;
+  uint32_t start = free_space[0];
+  uint32_t end = free_space[1];
 
   buf.free_spaces.push_back({start, end});
 

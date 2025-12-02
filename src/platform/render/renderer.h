@@ -55,7 +55,7 @@ public:
   virtual ResourceHandle createBuffer(size_t size,
                                       VkBufferUsageFlags usage_flags) = 0;
 
-  virtual uint32_t
+  virtual BufferHandle
   writeBuffer(ResourceHandle handle, void *data, uint32_t size,
               uint32_t offset = UINT32_MAX,
               VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE) = 0;
@@ -88,7 +88,7 @@ public:
   ResourceHandle createBuffer(size_t size,
                               VkBufferUsageFlags usage_flags) override;
 
-  uint32_t
+  BufferHandle
   writeBuffer(ResourceHandle handle, void *data, uint32_t size,
               uint32_t offset = UINT32_MAX,
               VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE) override;

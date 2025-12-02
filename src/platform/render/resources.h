@@ -139,6 +139,40 @@ private:
   RefCounted<Resource> ref;
 };
 
+struct BufferSpace {
+
+  BufferSpace(std::array<uint32_t, 2> space, ResourceHandle buffer_handle,
+              ResourceManager *manager);
+  ~BufferSpace();
+
+  std::array<uint32_t, 2> values;
+
+  // Contains Handle to prevent buffer from deletion as long as space in the
+  // buffer is used
+  ResourceHandle buffer_handle;
+
+private:
+  ResourceManager *manager;
+};
+
+// Handle that points to a used space in a buffer
+struct BufferHandle {
+
+  BufferHandle() = default;
+  BufferHandle(size_t buffer_idx, RefCounted<BufferSpace> space)
+      : buffer_idx(buffer_idx), buffer_space(space) {}
+
+  std::array<uint32_t, 2> getBufferSpace() const {
+    return {buffer_space->values[0], buffer_space->values[1]};
+  }
+
+  size_t getBufferIndex() const { return buffer_idx; }
+
+private:
+  size_t buffer_idx;
+  RefCounted<BufferSpace> buffer_space;
+};
+
 struct CombinedResourceIndexAndDescriptorType {
 
   CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type)
@@ -198,13 +232,14 @@ public:
   ResourceHandle createBuffer(size_t size, VkBufferUsageFlags usage_flags,
                               std::optional<std::string> name = std::nullopt);
 
-  // Writes to buffer, returns realignt Offset, if offset is uint32_max, uses
+  // Writes to buffer, returns BufferHandle, if offset is uint32_max, uses
   // current offset of buffer
-  uint32_t writeBuffer(ResourceHandle handle, void *data, uint32_t size,
-                       uint32_t offset = UINT32_MAX,
-                       VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE);
+  BufferHandle
+  writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+              uint32_t offset = UINT32_MAX,
+              VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE);
 
-  void freeBuffer(ResourceHandle handle, uint32_t size, uint32_t offset);
+  void freeBuffer(ResourceHandle handle, std::array<uint32_t, 2> free_space);
 
   ResourceHandle createImage(std::array<uint32_t, 3> extent,
                              VkImageType image_type, VkFormat image_format,

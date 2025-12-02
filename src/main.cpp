@@ -14,11 +14,14 @@ int main() {
   game::Game gameplay = {};
 
   { // Add Plugins
-    ScenePlugin scene_plugin{};
-    gameplay.addPlugin(scene_plugin);
 
     RenderPlugin render_plugin{};
     gameplay.addPlugin(render_plugin);
+
+    ScenePlugin scene_plugin{};
+    gameplay.addPlugin(scene_plugin);
+
+    
   }
 
   gameplay.runStartup();

@@ -22,10 +22,10 @@ void ScenePlugin::build(game::Game &game) {
 
   std::cout << "Initialize Scene Plugin\n";
 
-  game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>, Res<RenderBuffers>,
+  game.world.addSystem<ResMut<Commands>, ResMut<IRenderer *>, Res<RenderBuffers>,
                        Added<Read<LoadSceneName>>>(
-      game.Update, [](auto view, Entity e, Commands &cmd, Renderer *renderer,
-                      RenderBuffers &render_buffers, const LoadSceneName &load) {
+      game.Update, [](auto view, Entity e, Commands &cmd, IRenderer *renderer,
+                      const RenderBuffers &render_buffers, const LoadSceneName &load) {
         const std::string &file_path = load.load_scene;
 
         std::cout << "Load Scene " << file_path << "\n";
@@ -200,7 +200,7 @@ void ScenePlugin::build(game::Game &game) {
 
               // Upload GPU data here
               auto vertex_handle = render_buffers.data.at(BufferType::Vertex);
-              uint32_t gpu_vertex_offset =
+              BufferHandle gpu_vertex_handle =
                   renderer->writeBuffer(vertex_handle, bin_data.data(),
                                         sizeof(uint8_t) * bin_data.size(),
                                         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
@@ -208,21 +208,7 @@ void ScenePlugin::build(game::Game &game) {
 
               
 
-              cmd.push([gpu_vertex_offset, file_index_offset, file_index_size](Ecs *world) {
-
-
-
-                Entity e = world->createEntity();
-
-
-                SceneAssetStructs::Mesh mesh = {};
-                mesh.vertex_offset = gpu_vertex_offset;
-                mesh.index_offset = gpu_vertex_offset + file_index_offset;
-                mesh.index_number = file_index_size;
-
-                world->addComponent<SceneAssetStructs::Mesh>(e, mesh);
-
-              });
+             
 
             }
           }
