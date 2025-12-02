@@ -109,7 +109,7 @@ struct Buffer {
   uint32_t current_offset = 0;
   std::vector<std::array<uint32_t, 2>> free_spaces = {};
 
-  VkBufferUsageFlagBits usage_flags;
+  VkBufferUsageFlags usage_flags;
 };
 
 class ResourceManager;
@@ -128,13 +128,15 @@ private:
 
 struct ResourceHandle {
 
+  ResourceHandle() : idx(UINT64_MAX), ref(nullptr) {}
+
   ResourceHandle(uint64_t idx, RefCounted<Resource> _ref)
       : idx(idx), ref(_ref) {}
 
-  const uint64_t idx;
+  uint64_t idx;
 
 private:
-  const RefCounted<Resource> ref;
+  RefCounted<Resource> ref;
 };
 
 struct CombinedResourceIndexAndDescriptorType {
@@ -193,7 +195,7 @@ public:
 
   DeletionQueue<ResourceManager> _deletion_queue;
 
-  ResourceHandle createBuffer(size_t size, VkBufferUsageFlagBits usage_flags,
+  ResourceHandle createBuffer(size_t size, VkBufferUsageFlags usage_flags,
                               std::optional<std::string> name = std::nullopt);
 
   // Writes to buffer, returns realignt Offset, if offset is uint32_max, uses
@@ -215,11 +217,8 @@ public:
                   std::array<uint32_t, 3> offset = {0, 0, 0},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
 
-  
   const Image &getImage(size_t idx);
   const Buffer &getBuffer(size_t idx);
-
-
 
   const VkDevice &_device;
   const VmaAllocator &_allocator;

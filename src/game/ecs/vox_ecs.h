@@ -2,14 +2,12 @@
 #include "dynamic_bitset.h"
 #include "thread_pool.h"
 #include <cassert>
-#include <cinttypes>
+
 #include <cstdint>
 #include <functional>
-#include <memory>
-#include <thread>
+
 #include <type_traits>
-#include <typeindex>
-#include <unordered_map>
+
 #include <unordered_set>
 #include <vector>
 
@@ -31,13 +29,6 @@ struct Schedule {
   std::unordered_set<uint32_t> systems;
 };
 
-template <typename T> struct Added {
-  using type = T;
-};
-
-template <typename T> struct isMarkedAdded : std::false_type {};
-template <typename T> struct isMarkedAdded<Added<T>> : std::true_type {};
-
 template <typename T> struct Write {
   using type = T;
 };
@@ -45,6 +36,15 @@ template <typename T> struct Write {
 template <typename T> struct Read {
   using type = T;
 };
+
+template <typename T> struct Added {
+  using type = T;
+};
+
+template <typename T> struct isMarkedAdded : std::false_type {};
+template <typename T> struct isMarkedAdded<Added<T>> : std::true_type {};
+template <typename T> struct isMarkedAdded<Added<Read<T>>> : std::true_type {};
+template <typename T> struct isMarkedAdded<Added<Write<T>>> : std::true_type {};
 
 template <typename T> struct unwrap_component {
   using type = T;
@@ -370,6 +370,7 @@ public:
 
     template <typename T, typename smallest_T>
     inline bool hasComponent(Entity e) {
+
       if constexpr (is_read_or_write<T>::value &&
                     !std::is_same_v<component_t<T>, component_t<smallest_T>>) {
 
@@ -384,10 +385,27 @@ public:
                   (*tick)[(*sparse)[e]].added == ecs->current_world_tick);
         }
 
-        return (e < (*sparse).size() && (*sparse)[e] != NO_ENTITY);
+        else {
+          return (e < (*sparse).size() && (*sparse)[e] != NO_ENTITY);
+        }
 
       } else {
-        return true;
+
+        // Is Smallest Set, No need to check if Entity has Component because we get it from the samllest T sparse set
+
+        if constexpr (is_read_or_write<T>::value && isMarkedAdded<T>::value) {
+
+          static SparseSet<component_t<smallest_T>> &smallest_set =
+              ecs->getOrCreateSparseSet<component_t<smallest_T>>();
+          static std::vector<uint32_t> *smallest_sparse = &smallest_set.sparse;
+          static std::vector<Tick> *smallest_tick = &smallest_set.tick;
+
+          return (*smallest_tick)[(*smallest_sparse)[e]].added ==
+                 ecs->current_world_tick;
+
+        } else {
+          return true;
+        }
       }
     }
   };
@@ -420,7 +438,11 @@ public:
     set.dense.push_back({component, e});
     set.tick.push_back({current_world_tick, current_world_tick});
 
+    assert(set.dense.size() == set.tick.size());
+
     uint32_t dense_index = set.dense.size() - 1;
+
+    assert(set.tick[dense_index].added == current_world_tick);
 
     if (e >= set.sparse.size()) {
       set.sparse.resize(e + 1, NO_ENTITY);
@@ -455,6 +477,8 @@ public:
 
     insertResource<Removed<T>>(set.removed);
   }
+
+  const uint32_t getCurrentWorldTick() { return current_world_tick; }
 
   template <typename... Ts, typename Func> void forEach(Func &&func) {
 
@@ -546,12 +570,15 @@ public:
     static const auto c_lookup_write_table = [&]() {
       bit::Bitset write(sizeof...(Ts));
 
-      ((is_write<Ts>::value
-            ? (write.setBit(getTypeId<typename unwrap_component<Ts>::type>(),
-                            true),
-               true)
-            : false),
-       ...);
+      (
+          [&] {
+            if constexpr (is_write<Ts>::value) {
+
+              write.setBit(getTypeId<typename unwrap_component<Ts>::type>(),
+                           true);
+            }
+          }(),
+          ...);
 
       return write;
     }();
@@ -559,12 +586,15 @@ public:
     static const auto c_lookup_read_table = [&]() {
       bit::Bitset read(sizeof...(Ts));
 
-      ((is_read<Ts>::value
-            ? (read.setBit(getTypeId<typename unwrap_component<Ts>::type>(),
-                           true),
-               true)
-            : false),
-       ...);
+      (
+          [&] {
+            if constexpr (is_read<Ts>::value) {
+
+              read.setBit(getTypeId<typename unwrap_component<Ts>::type>(),
+                          true);
+            }
+          }(),
+          ...);
 
       return read;
     }();
@@ -572,12 +602,15 @@ public:
     static const auto r_lookup_write_table = [&]() {
       bit::Bitset write(sizeof...(Ts));
 
-      ((isMutableResource<Ts>::value
-            ? (write.setBit(getResourceId<typename unwrapResource<Ts>::type>(),
-                            true),
-               true)
-            : false),
-       ...);
+      (
+          [&] {
+            if constexpr (isMutableResource<Ts>::value) {
+
+              write.setBit(getResourceId<typename unwrapResource<Ts>::type>(),
+                           true);
+            }
+          }(),
+          ...);
 
       return write;
     }();
@@ -585,12 +618,15 @@ public:
     static const auto r_lookup_read_table = [&]() {
       bit::Bitset read(sizeof...(Ts));
 
-      ((isConstResource<Ts>::value
-            ? (read.setBit(getResourceId<typename unwrapResource<Ts>::type>(),
-                           true),
-               true)
-            : false),
-       ...);
+      (
+          [&] {
+            if constexpr (isConstResource<Ts>::value) {
+
+              read.setBit(getResourceId<typename unwrapResource<Ts>::type>(),
+                          true);
+            }
+          }(),
+          ...);
 
       return read;
     }();
@@ -705,9 +741,9 @@ public:
     if (e >= entity_what_components.size())
       return; // Has no components or does not exist
 
-    for (size_t i = 0; i < entity_what_components[e].size(); i++) {
-      SparseSetBase *set = sets[i];
+    for (uint32_t comp_id : entity_what_components[e]) {
 
+      SparseSetBase *set = sets[comp_id];
       set->remove(this, set, e);
     }
 
@@ -716,7 +752,7 @@ public:
 
   template <typename T> T *getComponent(Entity e) {
 
-    SparseSet<T> set = getOrCreateSparseSet<T>();
+    SparseSet<T> &set = getOrCreateSparseSet<T>();
 
     if (e >= set.sparse.size() || set.sparse[e] == NO_ENTITY)
       return nullptr;
@@ -811,6 +847,7 @@ private:
     SystemView<Ts...> view(this);
 
     size_t smallest_size = smallest_set->dense.size();
+
     for (size_t i = 0; i < smallest_size; i++) {
       Entity e = smallest_set->dense[i].entity;
 

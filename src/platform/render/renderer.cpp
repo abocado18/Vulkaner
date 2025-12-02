@@ -963,29 +963,34 @@ void Renderer::resizeSwapchain() {
   _resized_requested = false;
 }
 
-Buffer Renderer::createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
-                              VmaMemoryUsage memory_usage) {
+ResourceHandle Renderer::createBuffer(size_t size,
+                                      VkBufferUsageFlags usage_flags) {
 
-  VkBufferCreateInfo buffer_info = {};
-  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-
-  buffer_info.size = alloc_size;
-  buffer_info.usage = usage;
-
-  VmaAllocationCreateInfo alloc_info = {};
-  alloc_info.usage = memory_usage;
-  alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-  Buffer new_buffer;
-
-  VK_CHECK(vmaCreateBuffer(_allocator, &buffer_info, &alloc_info,
-                           &new_buffer.buffer, &new_buffer.allocation,
-                           &new_buffer.allocation_info),
-           "Create new Buffer");
-
-  return new_buffer;
+  return _resource_manager->createBuffer(size, usage_flags);
 }
 
-void Renderer::destroyBuffer(const Buffer &buffer) {
-  vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
+uint32_t Renderer::writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+                               uint32_t offset,
+                               VkAccessFlags new_buffer_access_flags) {
+
+  return _resource_manager->writeBuffer(handle, data, size, offset,
+                                        new_buffer_access_flags);
+}
+
+ResourceHandle
+Renderer::createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
+                      VkFormat image_format, VkImageUsageFlagBits image_usage,
+                      VkImageViewType view_type, VkImageAspectFlags aspect_mask,
+                      bool create_mipmaps, uint32_t array_layers) {
+
+  return _resource_manager->createImage(extent, image_type, image_format,
+                                        image_usage, view_type, aspect_mask,
+                                        create_mipmaps, array_layers);
+}
+
+void Renderer::writeImage(ResourceHandle handle, void *data, uint32_t size,
+                          std::array<uint32_t, 3> offset,
+                          VkImageLayout new_layout) {
+
+  _resource_manager->writeImage(handle, data, size, offset, new_layout);
 }

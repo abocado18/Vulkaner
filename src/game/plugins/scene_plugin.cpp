@@ -6,7 +6,6 @@
 #include "game/required_components/transform.h"
 #include "platform/math/math.h"
 #include "platform/render/renderer.h"
-#include <filesystem>
 
 #include <fstream>
 #include <ios>
@@ -21,11 +20,15 @@ void ScenePlugin::build(game::Game &game) {
 
   std::cout << "Initialize Scene Plugin\n";
 
+
+  /*
   game.world.addSystem<ResMut<Commands>, ResMut<Renderer *>,
-                       Added<Read<LoadScenePlugin>>>(
+                       Read<LoadSceneName>>(
       game.Update, [](auto view, Entity e, Commands &cmd, Renderer *renderer,
-                      LoadScenePlugin &load) {
+                      const LoadSceneName &load) {
         const std::string &file_path = load.load_scene;
+
+        std::cout << "Load Scene " << file_path << "\n";
 
         auto loadBinaryFile =
             [](const std::string &path) -> std::vector<uint8_t> {
@@ -57,9 +60,8 @@ void ScenePlugin::build(game::Game &game) {
             std::cerr << "Could not open Entity json file with path "
                       << file_path + "entities/entities.json\n";
 
-            cmd.push([e](Ecs *world) {
-              world->removeComponent<LoadScenePlugin>(e);
-            });
+            cmd.push(
+                [e](Ecs *world) { world->removeComponent<LoadSceneName>(e); });
 
             return;
           }
@@ -70,9 +72,8 @@ void ScenePlugin::build(game::Game &game) {
             std::cerr << "Entities Json File corrupted: "
                       << file_path + "entities/entities.json\n";
 
-            cmd.push([e](Ecs *world) {
-              world->removeComponent<LoadScenePlugin>(e);
-            });
+            cmd.push(
+                [e](Ecs *world) { world->removeComponent<LoadSceneName>(e); });
 
             return;
           }
@@ -177,28 +178,47 @@ void ScenePlugin::build(game::Game &game) {
                 continue;
               }
 
-
               size_t vertex_offset = mesh_json["vertex_offset"].get<size_t>();
               size_t index_offset = mesh_json["index_offset"].get<size_t>();
               size_t vertex_size = mesh_json["vertex_size"].get<size_t>();
               size_t index_size = mesh_json["index_size"].get<size_t>();
 
-              std::vector<uint8_t> bin_data = loadBinaryFile(file_path + "/meshes/" + m.mesh + ".mesh_data.bin");
+              std::vector<uint8_t> bin_data = loadBinaryFile(
+                  file_path + "/meshes/" + m.mesh + ".mesh_data.bin");
 
-              if(bin_data.size() == 0)
-              {
+              if (bin_data.size() == 0) {
                 std::cerr << "Corrupt Mesh Data\n";
                 continue;
               }
 
-              std::span<uint8_t> vertex_data = std::span(bin_data.begin() + vertex_offset, vertex_size);
-              std::span<uint8_t> index_data = std::span(bin_data.begin() + index_offset, index_size);
+              std::span<uint8_t> vertex_data =
+                  std::span(bin_data.begin() + vertex_offset, vertex_size);
+              std::span<uint8_t> index_data =
+                  std::span(bin_data.begin() + index_offset, index_size);
 
-              //Upload GPU data here
-              
-
+              // Upload GPU data here
             }
           }
         }
+      });
+      */
+
+      game.world.addSystem<Added<Read<LoadSceneName>>>(game.Update, [](auto view, Entity e,const LoadSceneName &name) {
+
+
+        std::cout << name.load_scene << " " << "ss\n" << e << std::endl;;
+
+
+      });
+
+  game.world.addSystem<ResMut<Commands>>(
+      game.Startup, [](auto view, Entity e, Commands &cmd) {
+
+        std::cout << "Load Test Scene\n";
+        cmd.push([](Ecs *world) {
+          Entity e = world->createEntity();
+          LoadSceneName n = {ASSET_PATH "/scene/"};
+          world->addComponent<LoadSceneName>(e, n);
+        });
       });
 }

@@ -21,7 +21,10 @@ game::Game::~Game() {
   world.executeCommands();
 }
 
-void game::Game::runStartup() { world.runSchedule(Startup); }
+void game::Game::runStartup() {
+  world.runSchedule(Startup);
+  world.executeCommands();
+}
 
 void game::Game::tick() {
 
@@ -49,6 +52,8 @@ void game::Game::tick() {
   world.executeCommands();
 
   world.update();
+
+ 
 }
 
 const bool game::Game::shouldRun() {

@@ -20,7 +20,6 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
-
 #include "deletion_queue.h"
 
 #include "resources.h"
@@ -47,35 +46,62 @@ struct FrameData {
 
 constexpr uint32_t FRAME_OVERLAP = 2;
 
-
+// Common Renderer Abstraction Interface, to do: replace vulkan objects with
+// general ones once you have a second graphics api
 class IRenderer {
+public:
+  virtual void draw(std::vector<RenderObject> &render_objects) = 0;
 
+  virtual ResourceHandle createBuffer(size_t size,
+                                      VkBufferUsageFlags usage_flags) = 0;
 
-  virtual void draw(std::vector<RenderObject> &render_objects);
+  virtual uint32_t
+  writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+              uint32_t offset = UINT32_MAX,
+              VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE) = 0;
 
+  virtual ResourceHandle
+  createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
+              VkFormat image_format, VkImageUsageFlagBits image_usage,
+              VkImageViewType view_type, VkImageAspectFlags aspect_mask,
+              bool create_mipmaps, uint32_t array_layers) = 0;
 
+  virtual void
+  writeImage(ResourceHandle handle, void *data, uint32_t size,
+             std::array<uint32_t, 3> offset = {0, 0, 0},
+             VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) = 0;
 
+  virtual bool shouldRun() = 0;
 };
 
-
-class Renderer : IRenderer {
+class Renderer : public IRenderer {
 public:
   Renderer(uint32_t width, uint32_t height);
   ~Renderer();
 
-  inline bool shouldUpdate() const {
+  inline bool shouldRun() override {
     return !glfwWindowShouldClose(_window_handle);
   }
 
-  void draw(std::vector<RenderObject> &render_objects);
+  void draw(std::vector<RenderObject> &render_objects) override;
 
-  // Move to Resources later
-  Buffer createBuffer(size_t alloc_size, VkBufferUsageFlags usage,
-                      VmaMemoryUsage memory_usage);
+  ResourceHandle createBuffer(size_t size,
+                              VkBufferUsageFlags usage_flags) override;
 
-  void destroyBuffer(const Buffer &buffer);
+  uint32_t
+  writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+              uint32_t offset = UINT32_MAX,
+              VkAccessFlags new_buffer_access_flags = VK_ACCESS_NONE) override;
 
- 
+  ResourceHandle
+  createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
+              VkFormat image_format, VkImageUsageFlagBits image_usage,
+              VkImageViewType view_type, VkImageAspectFlags aspect_mask,
+              bool create_mipmaps, uint32_t array_layers) override;
+
+  void writeImage(ResourceHandle handle, void *data, uint32_t size,
+                  std::array<uint32_t, 3> offset = {0, 0, 0},
+                  VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) override;
 
 private:
   VkInstance _instance;

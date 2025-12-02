@@ -21,10 +21,14 @@ int main() {
     gameplay.addPlugin(render_plugin);
   }
 
+  gameplay.runStartup();
+
   while (gameplay.shouldRun()) {
 
     gameplay.tick();
   }
+
+  
 
   return 0;
 }

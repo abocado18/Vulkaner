@@ -58,7 +58,7 @@ namespace SceneFormatStructs
 
 
 
-struct LoadScenePlugin {
+struct LoadSceneName {
   std::string load_scene;
 };
 

@@ -275,7 +275,7 @@ ResourceManager::~ResourceManager() {
 void ResourceManager::runDeletionQueue() { _deletion_queue.flush(this); }
 
 ResourceHandle ResourceManager::createBuffer(size_t size,
-                                             VkBufferUsageFlagBits usage_flags,
+                                             VkBufferUsageFlags usage_flags,
                                              std::optional<std::string> name) {
 
   VkBufferCreateInfo create_info = {};
