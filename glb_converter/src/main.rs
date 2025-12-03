@@ -54,14 +54,20 @@ pub struct MeshRenderer {
     pub material: uuid::Uuid,
 }
 
+#[derive(Serialize, Deserialize)]
+enum Texture {
+    Albedo(Option<uuid::Uuid>),
+    MetallicRoughness(Option<uuid::Uuid>),
+    Normal(Option<uuid::Uuid>),
+    Emissive(Option<uuid::Uuid>),
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct Material {
     pub id: uuid::Uuid,
     pub name: String,
-    pub albedo_texture: Option<uuid::Uuid>,
-    pub normal_texture: Option<uuid::Uuid>,
-    pub metallic_roughness_texture: Option<uuid::Uuid>,
-    pub emissive_texture: Option<uuid::Uuid>,
+
+    pub textures: Vec<Texture>,
 
     pub albedo_color: [f32; 4],
     pub metallic: f32,
@@ -235,7 +241,7 @@ fn main() -> anyhow::Result<()> {
 
                 image.extent = [img.width() as usize, img.height() as usize];
 
-                img_data = img.to_rgb8().into_raw();
+                img_data = img.to_rgba8().into_raw();
             }
 
             _ => {
@@ -265,26 +271,39 @@ fn main() -> anyhow::Result<()> {
             let albedo_tex = m.pbr_metallic_roughness().base_color_texture();
 
             if (albedo_tex).is_some() {
-                mat.albedo_texture = Some(image_uuids[albedo_tex.unwrap().texture().index()]);
+                mat.textures.push(Texture::Albedo(Some(
+                    image_uuids[albedo_tex.unwrap().texture().index()],
+                )));
+            } else {
+                mat.textures.push(Texture::Albedo(None));
             }
 
             let metallic_roughness_tex = m.pbr_metallic_roughness().metallic_roughness_texture();
 
             if metallic_roughness_tex.is_some() {
-                mat.metallic_roughness_texture =
-                    Some(image_uuids[metallic_roughness_tex.unwrap().texture().index()]);
+                mat.textures.push(Texture::MetallicRoughness(Some(
+                    image_uuids[metallic_roughness_tex.unwrap().texture().index()],
+                )));
+            } else {
+                mat.textures.push(Texture::MetallicRoughness(None));
             }
 
             let emissive_tex = m.emissive_texture();
 
             if emissive_tex.is_some() {
-                mat.emissive_texture = Some(image_uuids[emissive_tex.unwrap().texture().index()]);
+                mat.textures
+                    .push(Texture::Emissive(Some(image_uuids[emissive_tex.unwrap().texture().index()])));
+            } else {
+                mat.textures.push(Texture::Emissive(None));
             }
 
             let normal_tex = m.normal_texture();
 
             if normal_tex.is_some() {
-                mat.normal_texture = Some(image_uuids[normal_tex.unwrap().texture().index()]);
+                mat.textures
+                    .push(Texture::Normal(Some(image_uuids[normal_tex.unwrap().texture().index()])));
+            } else {
+                mat.textures.push(Texture::Normal(None));
             }
 
             mat.albedo_color = m.pbr_metallic_roughness().base_color_factor();
@@ -299,7 +318,10 @@ fn main() -> anyhow::Result<()> {
 
         let material_file = format!("materials/materials.json");
         std::fs::create_dir_all(std::path::Path::new(&material_file).parent().unwrap())?;
-        std::fs::write(&material_file, serde_json::to_string_pretty(&all_materials)?)?;
+        std::fs::write(
+            &material_file,
+            serde_json::to_string_pretty(&all_materials)?,
+        )?;
     }
 
     for _n in file.nodes() {

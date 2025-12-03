@@ -548,13 +548,14 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
     }
   }
 
-  _resource_manager->runDeletionQueue();
+  
 
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
                            UINT64_MAX),
            "Wait for Fence");
 
   getCurrentFrame()._deletion_queue.flush();
+  _resource_manager->runDeletionQueue();
 
   VK_CHECK(vkResetFences(_device, 1, &getCurrentFrame()._render_fence),
            "Reset Fence");
@@ -658,18 +659,27 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
             _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
             _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
       }
+
+      Buffer source_buffer = w.source_buffer;
+
+      getCurrentFrame()._deletion_queue.pushFunction([source_buffer, this]() {
+
+
+        vmaDestroyBuffer(_allocator, source_buffer.buffer, source_buffer.allocation);
+
+      });
     }
 
     _resource_manager->_deletion_queue.pushFunction(
         [](ResourceManager *manager) {
-          for (const auto &w : manager->getWrites()) {
-
-            vmaDestroyBuffer(manager->_allocator, w.source_buffer.buffer,
-                             w.source_buffer.allocation);
-          }
+        
 
           manager->clearWrites();
         });
+
+        
+
+        
 
     vkEndCommandBuffer(transfer_command_buffer);
 
@@ -979,7 +989,7 @@ BufferHandle Renderer::writeBuffer(ResourceHandle handle, void *data, uint32_t s
 
 ResourceHandle
 Renderer::createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
-                      VkFormat image_format, VkImageUsageFlagBits image_usage,
+                      VkFormat image_format, VkImageUsageFlags image_usage,
                       VkImageViewType view_type, VkImageAspectFlags aspect_mask,
                       bool create_mipmaps, uint32_t array_layers) {
 

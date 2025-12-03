@@ -62,7 +62,7 @@ public:
 
   virtual ResourceHandle
   createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
-              VkFormat image_format, VkImageUsageFlagBits image_usage,
+              VkFormat image_format, VkImageUsageFlags image_usage,
               VkImageViewType view_type, VkImageAspectFlags aspect_mask,
               bool create_mipmaps, uint32_t array_layers) = 0;
 
@@ -95,7 +95,7 @@ public:
 
   ResourceHandle
   createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
-              VkFormat image_format, VkImageUsageFlagBits image_usage,
+              VkFormat image_format, VkImageUsageFlags image_usage,
               VkImageViewType view_type, VkImageAspectFlags aspect_mask,
               bool create_mipmaps, uint32_t array_layers) override;
 

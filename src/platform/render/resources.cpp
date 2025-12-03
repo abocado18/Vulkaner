@@ -457,7 +457,7 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
                   &staging_buffer.allocation, &staging_buffer.allocation_info);
 
   staging_buffer.current_offset = 0;
-  staging_buffer.size = 0;
+  staging_buffer.size = size;
 
   std::memcpy(staging_buffer.allocation_info.pMappedData, data, size);
 
@@ -585,7 +585,7 @@ void ResourceManager::freeBuffer(ResourceHandle handle,
 
 ResourceHandle ResourceManager::createImage(
     std::array<uint32_t, 3> extent, VkImageType image_type,
-    VkFormat image_format, VkImageUsageFlagBits image_usage,
+    VkFormat image_format, VkImageUsageFlags image_usage,
     VkImageViewType view_type, VkImageAspectFlags aspect_mask,
     bool create_mipmaps, uint32_t array_layers) {
 
@@ -682,7 +682,7 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
                   &staging_buffer.allocation, &staging_buffer.allocation_info);
 
   staging_buffer.current_offset = 0;
-  staging_buffer.size = 0;
+  staging_buffer.size = size;
 
   std::memcpy(staging_buffer.allocation_info.pMappedData, data, size);
 

@@ -243,7 +243,7 @@ public:
 
   ResourceHandle createImage(std::array<uint32_t, 3> extent,
                              VkImageType image_type, VkFormat image_format,
-                             VkImageUsageFlagBits image_usage,
+                             VkImageUsageFlags image_usage,
                              VkImageViewType view_type,
                              VkImageAspectFlags aspect_mask,
                              bool create_mipmaps, uint32_t array_layers);
@@ -267,7 +267,18 @@ public:
 
   const std::vector<ResourceWriteInfo> &getWrites() const { return writes; }
 
-  void clearWrites() { writes.clear(); }
+  void clearWrites() { 
+    
+    
+    
+    
+    
+    
+    
+    writes.clear(); 
+  
+  
+  }
 
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources;

@@ -245,10 +245,7 @@ template <typename T> struct ResourceData : ResourceBase {
 
 class Ecs {
 public:
-  Ecs() : pool(thread_pool::ThreadPool()), current_world_tick(0) {
-
-    insertResource<Commands>({});
-  };
+  Ecs() : current_world_tick(0) { insertResource<Commands>({}); };
 
   ~Ecs() {
 
@@ -671,6 +668,8 @@ public:
 
   void runScheduleParallel(Schedule schedule) {
 
+    static thread_pool::ThreadPool pool{};
+
     auto checkConflict = [&schedule](const SystemWrapper &a,
                                      const SystemWrapper &b) {
       bool c_conflict =
@@ -784,8 +783,6 @@ public:
   }
 
 private:
-  thread_pool::ThreadPool pool;
-
   uint32_t current_world_tick = 0;
 
   template <typename... Ts, typename Func>
