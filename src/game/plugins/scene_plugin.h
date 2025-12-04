@@ -80,6 +80,7 @@ struct Mesh {
   bool visible = true;
 };
 
+//Fincal MEsh Component
 struct MeshRenderer {
   std::vector<Mesh> meshes{};
 };

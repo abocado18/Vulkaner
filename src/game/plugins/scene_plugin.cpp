@@ -290,34 +290,9 @@ void ScenePlugin::build(game::Game &game) {
         // Loop over all Entites and load Components, Meshes etc..
         for (auto &e : entities) {
 
-          auto quatToEuler = [](Quat<float> quat) -> Vec3<float> {
-            const float w = quat.w;
-            const float x = quat.x;
-            const float y = quat.y;
-            const float z = quat.z;
-
-            Vec3<float> euler = {};
-
-            float sinr_cosp = 2.0f * (w * x + y * z);
-            float cosr_cosp = 1.0f - 2.0f * (x * x + y * y);
-            euler.x = std::atan2(sinr_cosp, cosr_cosp);
-
-            float sinp = 2.0f * (w * y - z * x);
-            if (std::abs(sinp) >= 1.0f)
-              euler.y = std::copysign(M_PI / 2.0f, sinp); // clamp
-            else
-              euler.y = std::asin(sinp);
-
-            float siny_cosp = 2.0f * (w * z + x * y);
-            float cosy_cosp = 1.0f - 2.0f * (y * y + z * z);
-            euler.z = std::atan2(siny_cosp, cosy_cosp);
-
-            return euler;
-          };
-
           Transform transform = {};
           transform.translation = e.position;
-          transform.rotation = quatToEuler(e.rotation);
+          transform.rotation = e.rotation.toEuler();
           transform.scale = e.scale;
 
           Name name = {};
@@ -396,7 +371,19 @@ void ScenePlugin::build(game::Game &game) {
               mesh_renderer.meshes.push_back(gpu_mesh);
             }
 
-            // Havwe all meshes
+            // Have all meshes
+
+            cmd.push([transform, name, mesh_renderer](Ecs *world) {
+              Entity e = world->createEntity();
+
+              world->addComponent<Transform>(e, transform);
+              world->addComponent<Name>(e, name);
+
+              if (mesh_renderer.meshes.size() > 0) {
+                world->addComponent<SceneAssetStructs::MeshRenderer>(
+                    e, mesh_renderer);
+              }
+            });
           }
         }
       });

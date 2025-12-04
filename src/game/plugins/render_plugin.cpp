@@ -1,6 +1,7 @@
 #include "render_plugin.h"
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/plugins/scene_plugin.h"
 #include "platform/render/render_object.h"
 #include "platform/render/renderer.h"
 #include "platform/render/resources.h"
@@ -9,11 +10,14 @@
 
 void RenderPlugin::build(game::Game &game) {
 
+  using namespace vecs;
+
   std::cout << "Initialize Render Plugin\n";
 
   IRenderer *r = new Renderer(1280, 720);
 
   game.world.insertResource<IRenderer *>(r);
+  game.world.insertResource<RenderObjectsList>({});
 
   RenderBuffers render_buffers = {};
 
@@ -40,13 +44,11 @@ void RenderPlugin::build(game::Game &game) {
   game.world.addSystem<vecs::ResMut<IRenderer *>, vecs::ResMut<game::GameData>>(
       game.PostUpdate,
       [](auto view, vecs::Entity e, IRenderer *r, game::GameData &game_data) {
-        std::vector<RenderObject> render_objects = {};
+     
 
         if (r->shouldRun() == false) {
           game_data.should_run = false;
         }
-
-        r->draw(render_objects);
       });
 
   game.world.addSystem<vecs::ResMut<Renderer *>, vecs::ResMut<vecs::Commands>>(
@@ -55,5 +57,15 @@ void RenderPlugin::build(game::Game &game) {
         // Gets only called once
 
         cmd.push([r](vecs::Ecs *world) { delete r; });
+      });
+
+  game.world.addSystem<Read<SceneAssetStructs::MeshRenderer>, ResMut<IRenderer *>, ResMut<RenderObjectsList>>(
+      game.PostUpdate,
+      [](auto view, Entity e, const SceneAssetStructs::MeshRenderer &mesh_renderer, IRenderer *renderer, RenderObjectsList &objects_list) {
+
+        objects_list.render_objects.clear();
+
+        renderer->draw(objects_list.render_objects);
+
       });
 }
