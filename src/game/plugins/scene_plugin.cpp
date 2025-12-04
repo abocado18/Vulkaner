@@ -13,6 +13,7 @@
 #include <fstream>
 #include <ios>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -25,6 +26,7 @@ void ScenePlugin::build(game::Game &game) {
   std::cout << "Initialize Scene Plugin\n";
 
   game.world.addSystem<ResMut<Commands>, ResMut<IRenderer *>,
+
                        Res<RenderBuffers>, Added<Read<LoadSceneName>>>(
       game.Update,
       [](auto view, Entity e, Commands &cmd, IRenderer *renderer,
@@ -146,13 +148,13 @@ void ScenePlugin::build(game::Game &game) {
         std::unordered_map<SceneFormatStructs::uuid, SceneAssetStructs::Mesh>
             loaded_meshes = {};
         std::unordered_map<SceneFormatStructs::uuid,
-                           SceneAssetStructs::Material<StandardMaterial>>
+                           SceneAssetStructs::Material>
             loaded_materials; // Assume StandardMaterila for now
 
         for (auto &mat : materials_json) {
 
           // Assume StandardMaterial for now
-          SceneAssetStructs::Material<StandardMaterial> gpu_mat = {};
+          SceneAssetStructs::Material gpu_mat = {};
 
           for (auto &tex : mat["textures"]) {
 
@@ -255,28 +257,29 @@ void ScenePlugin::build(game::Game &game) {
             }
           }
 
-          gpu_mat.material_data.albedo[0] = mat["albedo_color"][0].get<float>();
-          gpu_mat.material_data.albedo[1] = mat["albedo_color"][1].get<float>();
-          gpu_mat.material_data.albedo[2] = mat["albedo_color"][2].get<float>();
-          gpu_mat.material_data.albedo[3] = mat["albedo_color"][3].get<float>();
+          StandardMaterial material_data{};
 
-          gpu_mat.material_data.metallic = mat["metallic"].get<float>();
-          gpu_mat.material_data.roughness = mat["roughness"].get<float>();
+          material_data.albedo[0] = mat["albedo_color"][0].get<float>();
+          material_data.albedo[1] = mat["albedo_color"][1].get<float>();
+          material_data.albedo[2] = mat["albedo_color"][2].get<float>();
+          material_data.albedo[3] = mat["albedo_color"][3].get<float>();
 
-          gpu_mat.material_data.emissive[0] =
-              mat["emissive_color"][0].get<float>();
-          gpu_mat.material_data.emissive[1] =
-              mat["emissive_color"][1].get<float>();
-          gpu_mat.material_data.emissive[2] =
-              mat["emissive_color"][2].get<float>();
+          material_data.metallic = mat["metallic"].get<float>();
+          material_data.roughness = mat["roughness"].get<float>();
+
+          material_data.emissive[0] = mat["emissive_color"][0].get<float>();
+          material_data.emissive[1] = mat["emissive_color"][1].get<float>();
+          material_data.emissive[2] = mat["emissive_color"][2].get<float>();
 
           auto material_buffer_handle =
               render_buffers.data.at(BufferType::Material);
 
           gpu_mat.gpu_material_handle = renderer->writeBuffer(
-              material_buffer_handle, &gpu_mat.material_data,
-              sizeof(gpu_mat.material_data), UINT32_MAX,
-              VK_ACCESS_SHADER_READ_BIT);
+              material_buffer_handle, &material_data, sizeof(material_data),
+              UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
+
+          gpu_mat.cpu_material =
+              std::make_shared<StandardMaterial>(material_data);
 
           loaded_materials.insert_or_assign(
               mat["id"].get<SceneFormatStructs::uuid>(), gpu_mat);
@@ -381,8 +384,9 @@ void ScenePlugin::build(game::Game &game) {
                                     (uint32_t)file_index_offset,
                     .index_number = (uint32_t)file_index_size,
                     .mesh_gpu_handle = gpu_vertex_handle,
+
+                    .material = loaded_materials.at(m.material),
                     .visible = true,
-                    .material_gpu_handle = loaded_materials.at(m.material),
                 };
 
                 loaded_meshes.insert_or_assign(m.mesh, mesh);

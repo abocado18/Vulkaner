@@ -1,11 +1,11 @@
 #pragma once
 #include <cmath>
+#include <numbers>
 #include <sys/types.h>
 
 template <typename T> struct Vec3 {
 
-  Vec3()
-      : x(static_cast<T>(0)), y(static_cast<T>(0)), z(static_cast<T>(0)){};
+  Vec3() : x(static_cast<T>(0)), y(static_cast<T>(0)), z(static_cast<T>(0)) {};
 
   Vec3(T x, T y, T z) : x(x), y(y), z(z) {};
 
@@ -75,20 +75,49 @@ template <typename T> struct Quat {
   static Quat identity() { return {0, 0, 0, 1}; }
 
   static Quat fromEuler(const Vec3<T> &euler) {
-    T cx = std::cos(euler.x * static_cast<T>(0.5));
-    T sx = std::sin(euler.x * static_cast<T>(0.5));
-    T cy = std::cos(euler.y * static_cast<T>(0.5));
-    T sy = std::sin(euler.y * static_cast<T>(0.5));
-    T cz = std::cos(euler.z * static_cast<T>(0.5));
-    T sz = std::sin(euler.z * static_cast<T>(0.5));
 
-    // Y->X->Z Order
-    Quat q;
-    q.w = cx * cy * cz + sx * sy * sz;
-    q.x = sx * cy * cz + cx * sy * sz;
-    q.y = cx * sy * cz - sx * cy * sz;
-    q.z = cx * cy * sz - sx * sy * cz;
+    T roll = euler.x;
+    T pitch = euler.y;
+    T yaw = euler.z;
+
+    T cr = std::cos(roll * 0.5);
+    T sr = std::sin(roll * 0.5);
+    T cp = std::cos(pitch * 0.5);
+    T sp = std::sin(pitch * 0.5);
+    T cy = std::cos(yaw * 0.5);
+    T sy = std::sin(yaw * 0.5);
+
+    Quat<T> q;
+
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+
     return q;
+  }
+
+  Vec3<T> toEuler() const {
+
+    Quat<T> q = this->normalized();
+
+    Vec3<T> euler{};
+
+    T sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
+    T cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
+    euler.x = std::atan2(sinr_cosp, cosr_cosp);
+
+    T sinp = 2 * (q.w * q.y - q.x * q.z);
+    if (std::abs(sinp) >= 1)
+      euler.y = std::copysign(M_PI / 2, sinp); 
+    else
+      euler.y = std::asin(sinp);
+
+    T siny_cosp = 2 * (q.w * q.z + q.x * q.y);
+    T cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
+    euler.z = std::atan2(siny_cosp, cosy_cosp);
+
+    return euler;
   }
 
   Quat<T> normalized() const {
