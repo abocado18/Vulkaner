@@ -6,9 +6,11 @@
 #include <cstdint>
 #include <functional>
 
+#include <tuple>
 #include <type_traits>
 
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <cassert>
@@ -263,7 +265,8 @@ public:
     bool is_dirty = false;
   };
 
-  template <typename... Ts> class SystemView : SystemViewBase {
+  template <typename smallest_T, typename... Ts>
+  class SystemView : SystemViewBase {
 
     friend class Ecs;
 
@@ -295,6 +298,32 @@ public:
       } else {
         return static_cast<component_t<T> &>(
             sparse_set.dense[sparse_set.sparse.at(e)].component);
+      }
+    }
+
+    template <typename Func> void forEach(Func &&func) {
+
+      constexpr bool isResoucesOnly =
+          ([]() { return std::is_void_v<smallest_T>; }());
+
+      if constexpr (isResoucesOnly) {
+
+        func(this, NO_ENTITY, getSystemArgument<Ts>(NO_ENTITY)...);
+
+      }
+
+      else {
+        static SparseSet<component_t<smallest_T>> &smallest_set =
+            ecs->getOrCreateSparseSet<component_t<smallest_T>>();
+
+        for (size_t i = 0; i < smallest_set.dense.size(); i++) {
+          Entity e = smallest_set.dense[i].entity;
+
+          if (!hasAllComponents(e))
+            continue;
+
+          func(this, e, getSystemArgument<Ts>(e)...);
+        }
       }
     }
 
@@ -356,17 +385,16 @@ public:
       }
     }
 
-    template <typename smallest_T> inline bool hasAllComponents(Entity e) {
+    inline bool hasAllComponents(Entity e) {
 
       static_assert(
           ((is_read_or_write<Ts>::value || isResource<Ts>::value) && ...),
           "Must be a resource or component");
 
-      return (... && hasComponent<Ts, smallest_T>(e));
+      return (... && hasComponent<Ts>(e));
     }
 
-    template <typename T, typename smallest_T>
-    inline bool hasComponent(Entity e) {
+    template <typename T> inline bool hasComponent(Entity e) {
 
       if constexpr (is_read_or_write<T>::value &&
                     !std::is_same_v<component_t<T>, component_t<smallest_T>>) {
@@ -478,7 +506,7 @@ public:
 
   const uint32_t getCurrentWorldTick() { return current_world_tick; }
 
-  template <typename... Ts, typename Func> void forEach(Func &&func) {
+  template <typename... Ts, typename Func> void run(Func &&func) {
 
     static_assert(((is_read_or_write<Ts>::value || isConstResource<Ts>::value ||
                     isMutableResource<Ts>::value) &&
@@ -509,7 +537,7 @@ public:
     if (smallest_size == SIZE_MAX) {
       // Only Resources
 
-      iterateResourceOnly<Ts...>(func);
+      runResourceOnly<Ts...>(func);
       return;
     }
 
@@ -517,9 +545,8 @@ public:
         [&]() {
           if constexpr (is_read_or_write<Ts>::value) {
             if (count++ == smallest_index) {
-              iterateSparseSet<Ts, Ts...>(
-                  &getOrCreateSparseSet<component_t<Ts>>(), smallest_index,
-                  func);
+              runComponents<Ts, Ts...>(&getOrCreateSparseSet<component_t<Ts>>(),
+                                       smallest_index, func);
             }
           } else {
             count++;
@@ -631,7 +658,7 @@ public:
     }();
 
     std::function<void(Ecs *)> wrapper = [func](Ecs *ecs) {
-      ecs->forEach<Ts...>(func);
+      ecs->run<Ts...>(func);
     };
 
     uint32_t system_id = getNextSystemId();
@@ -785,12 +812,21 @@ public:
 private:
   uint32_t current_world_tick = 0;
 
-  template <typename... Ts, typename Func>
-  void iterateResourceOnly(Func &&func) {
+  template <typename... Ts, typename Func> void runResourceOnly(Func &&func) {
 
-    SystemView<Ts...> view(this);
+    SystemView<void, Ts...> view(this);
 
-    func(view, NO_ENTITY, view.template getSystemArgument<Ts>(NO_ENTITY)...);
+    auto resource_tuple = std::tuple_cat(
+        std::tuple<decltype(view) &>{view}, ([&view]() -> auto {
+          if constexpr (isResource<Ts>::value) {
+            return std::tuple<decltype(view.template getSystemArgument<Ts>(
+                NO_ENTITY)) &>{view.template getSystemArgument<Ts>(NO_ENTITY)};
+          } else {
+            return std::tuple<>{};
+          }
+        }())...);
+
+    std::apply(func, resource_tuple);
   }
 
   template <typename T> resource_r<T> getResourceForLoop() {
@@ -828,8 +864,8 @@ private:
   }
 
   template <typename smallest_T, typename... Ts, typename Func>
-  inline void iterateSparseSet(SparseSet<component_t<smallest_T>> *smallest_set,
-                               uint32_t smallest_index, Func &&func) noexcept {
+  inline void runComponents(SparseSet<component_t<smallest_T>> *smallest_set,
+                            uint32_t smallest_index, Func &&func) noexcept {
 
     // smallest T is still in Wrapper
 
@@ -843,18 +879,21 @@ private:
     if (smallest_set == nullptr)
       return;
 
-    SystemView<Ts...> view(this);
+    SystemView<smallest_T, Ts...> view(this);
 
-    size_t smallest_size = smallest_set->dense.size();
+    // func(view, std::apply(filteredResourceArguments));
 
-    for (size_t i = 0; i < smallest_size; i++) {
-      Entity e = smallest_set->dense[i].entity;
+    auto resource_tuple = std::tuple_cat(
+        std::tuple<decltype(view) &>{view}, ([&view]() -> auto {
+          if constexpr (isResource<Ts>::value) {
+            return std::tuple<decltype(view.template getSystemArgument<Ts>(
+                NO_ENTITY)) &>{view.template getSystemArgument<Ts>(NO_ENTITY)};
+          } else {
+            return std::tuple<>{};
+          }
+        }())...);
 
-      if (!view.template hasAllComponents<smallest_T>(e))
-        continue;
-
-      func(view, e, view.template getSystemArgument<Ts>(e)...);
-    }
+    std::apply(func, resource_tuple);
   }
 
   template <typename T> SparseSet<T> &getOrCreateSparseSet() {

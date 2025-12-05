@@ -568,6 +568,10 @@ void ResourceManager::freeBuffer(ResourceHandle handle,
 
   std::vector<std::array<uint32_t, 2>> merged;
 
+  if (!buf.free_spaces.empty()) {
+    merged.push_back(buf.free_spaces[0]);
+  }
+
   for (size_t i = 1; i < buf.free_spaces.size(); i++) {
     auto &last = merged.back();
     auto &current = buf.free_spaces[i];

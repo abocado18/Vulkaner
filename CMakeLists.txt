@@ -126,9 +126,9 @@ endif()
 
 
 if(MSVC)
-   # target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
+    target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-   # target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
 
 endif()
 
