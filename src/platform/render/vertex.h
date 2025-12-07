@@ -54,14 +54,15 @@ getVertexAttributeDescription() {
   return descs;
 };
 
-inline VkVertexInputBindingDescription getVertexBindingDescription() {
+inline std::array<VkVertexInputBindingDescription, 1>
+getVertexBindingDescription() {
 
   VkVertexInputBindingDescription desc = {};
   desc.binding = 0;
   desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
   desc.stride = sizeof(Vertex);
 
-  return desc;
+  return {desc};
 }
 
 } // namespace vertex

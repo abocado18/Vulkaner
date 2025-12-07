@@ -12,11 +12,11 @@
 #include <string>
 #include <vector>
 
+#include "spirv_cross.hpp"
+
 #ifndef PRODUCTION_BUILD
 
 #endif
-
-
 
 class PipelineBuilder {
 public:
@@ -58,6 +58,38 @@ public:
   VkPipeline buildPipeline(VkDevice device);
 };
 
+enum class PipelineType { GRAPHICS, COMPUTE };
+
+class PipelineBuilder2 {
+public:
+  std::vector<VkPipelineShaderStageCreateInfo> _shader_stages;
+
+  VkPipelineDynamicStateCreateInfo dynamic_info{};
+  VkPipelineVertexInputStateCreateInfo vertex_info{};
+  VkPipelineInputAssemblyStateCreateInfo assembly_info{};
+  VkPipelineViewportStateCreateInfo viewport_info{};
+  VkPipelineRasterizationStateCreateInfo rasterization_info{};
+  VkPipelineMultisampleStateCreateInfo multisample_info{};
+  VkPipelineColorBlendAttachmentState color_blend_attachment{};
+  VkPipelineColorBlendStateCreateInfo color_blend_info{};
+
+  std::array<VkVertexInputAttributeDescription, 5> vertex_attribute_desc;
+  std::array<VkVertexInputBindingDescription, 1> vertex_binding_desc;
+
+  std::vector<VkDynamicState> dynamic_states {};
+
+  VkPipelineLayout layout;
+
+  PipelineBuilder2(VkDevice &device) : device(device) {}
+
+  void makeGraphicsDefault(std::span<VkDescriptorSetLayoutBinding> bindings);
+
+  VkPipeline buildPipeline(VkDevice device);
+
+private:
+  VkDevice &device;
+};
+
 class PipelineManager {
 public:
   PipelineManager(const std::string path, VkDevice &device);
@@ -83,4 +115,6 @@ private:
   const std::string _shader_path;
 
   VkDevice &_device;
+
+
 };

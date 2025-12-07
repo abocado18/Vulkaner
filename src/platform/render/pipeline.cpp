@@ -1,7 +1,9 @@
 #include "pipeline.h"
+#include "platform/render/vertex.h"
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -379,4 +381,67 @@ void PipelineBuilder::enableBlendingAlphaBlend() {
   _color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
   _color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
   _color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
+void PipelineBuilder2::makeGraphicsDefault(
+    std::span<VkDescriptorSetLayoutBinding> bindings) {
+
+  PipelineBuilder2 &builder = *this;
+
+  dynamic_states = {
+      VK_DYNAMIC_STATE_SCISSOR,
+      VK_DYNAMIC_STATE_VIEWPORT,
+  };
+
+  builder.dynamic_info.dynamicStateCount = dynamic_states.size();
+  builder.dynamic_info.pDynamicStates = dynamic_states.data();
+
+  vertex_attribute_desc = vertex::getVertexAttributeDescription();
+  vertex_binding_desc = vertex::getVertexBindingDescription();
+
+  builder.vertex_info.vertexAttributeDescriptionCount =
+      vertex_attribute_desc.size();
+  builder.vertex_info.pVertexAttributeDescriptions =
+      vertex_attribute_desc.data();
+
+  builder.vertex_info.vertexBindingDescriptionCount =
+      vertex_binding_desc.size();
+  builder.vertex_info.pVertexBindingDescriptions = vertex_binding_desc.data();
+
+  builder.assembly_info.primitiveRestartEnable = VK_FALSE;
+  builder.assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+  builder.viewport_info.viewportCount = 1;
+  builder.viewport_info.scissorCount = 1;
+
+  builder.rasterization_info.depthClampEnable = VK_FALSE;
+  builder.rasterization_info.rasterizerDiscardEnable = VK_FALSE;
+  builder.rasterization_info.polygonMode = VK_POLYGON_MODE_FILL;
+  builder.rasterization_info.cullMode = VK_CULL_MODE_NONE;
+  builder.rasterization_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
+  builder.rasterization_info.depthBiasEnable = VK_FALSE;
+  builder.rasterization_info.depthBiasSlopeFactor = 1.0f;
+  builder.rasterization_info.lineWidth = 1.0f;
+
+  builder.multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  builder.multisample_info.sampleShadingEnable = VK_FALSE;
+
+  builder.color_blend_attachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+  builder.color_blend_attachment.blendEnable = VK_TRUE;
+  builder.color_blend_attachment.srcColorBlendFactor =
+      VK_BLEND_FACTOR_SRC_ALPHA;
+  builder.color_blend_attachment.dstColorBlendFactor =
+      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  builder.color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+  builder.color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  builder.color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+  builder.color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+  builder.color_blend_info.logicOpEnable = VK_FALSE;
+  builder.color_blend_info.logicOp = VK_LOGIC_OP_COPY;
+  builder.color_blend_info.attachmentCount = 1;
+  builder.color_blend_info.pAttachments = &builder.color_blend_attachment;
 }
