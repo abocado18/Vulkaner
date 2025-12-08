@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "spirv_cross.hpp"
@@ -58,7 +59,10 @@ public:
   VkPipeline buildPipeline(VkDevice device);
 };
 
-enum class PipelineType { GRAPHICS, COMPUTE };
+struct Pipeline {
+  VkPipelineLayout layout;
+  VkPipeline pipeline;
+};
 
 class PipelineBuilder2 {
 public:
@@ -76,18 +80,15 @@ public:
   std::array<VkVertexInputAttributeDescription, 5> vertex_attribute_desc;
   std::array<VkVertexInputBindingDescription, 1> vertex_binding_desc;
 
-  std::vector<VkDynamicState> dynamic_states {};
+  std::vector<VkDynamicState> dynamic_states{};
 
   VkPipelineLayout layout;
 
-  PipelineBuilder2(VkDevice &device) : device(device) {}
+  PipelineBuilder2() {}
 
-  void makeGraphicsDefault(std::span<VkDescriptorSetLayoutBinding> bindings);
+  void makeGraphicsDefault();
 
   VkPipeline buildPipeline(VkDevice device);
-
-private:
-  VkDevice &device;
 };
 
 class PipelineManager {
@@ -97,9 +98,18 @@ public:
 
   std::optional<VkShaderModule>
   createShaderModule(const std::string &name,
-                     const std::string &entry_point_name);
+                     const std::string &entry_point_name,
+                     std::vector<uint32_t> &out_spv_shader_data);
+
+  size_t createGraphicsPipeline(
+      PipelineBuilder2 pipeline_builder,
+      std::array<std::string, 4> shader_modules_name_and_entry_point);
 
 private:
+  uint64_t generateDescriptorSetLayoutHashKey(
+      const std::unordered_map<
+          uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets) const;
+
 #ifndef PRODUCTION_BUILD
 
   Slang::ComPtr<slang::IGlobalSession> _global_session;
@@ -110,11 +120,12 @@ private:
 
 #endif
 
+  std::unordered_map<uint64_t, std::vector<VkDescriptorSetLayout>>
+      _set_layouts{};
+
   bool runtime_compilation_possible;
 
   const std::string _shader_path;
 
   VkDevice &_device;
-
-
 };

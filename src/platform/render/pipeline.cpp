@@ -2,15 +2,24 @@
 #include "platform/render/vertex.h"
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
+#include "spirv.hpp"
+#include "spirv_cross.hpp"
 #include "vulkan/vulkan_core.h"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <optional>
-#include <slang-com-helper.h>
 #include <string>
+#include <sys/types.h>
+#include <unordered_map>
 #include <vector>
+
+#include <algorithm>
+
+#ifndef PRODUCTION_BUILD
 
 #include "slang-com-ptr.h"
 #include "slang.h"
@@ -20,6 +29,8 @@ void diagnoseIfNeeded(slang::IBlob *diagnosticsBlob) {
     std::cout << (const char *)diagnosticsBlob->getBufferPointer() << std::endl;
   }
 }
+
+#endif
 
 PipelineManager::PipelineManager(const std::string path, VkDevice &device)
     : _device(device), _shader_path(path) {
@@ -57,9 +68,9 @@ PipelineManager::PipelineManager(const std::string path, VkDevice &device)
 
 PipelineManager::~PipelineManager() {}
 
-std::optional<VkShaderModule>
-PipelineManager::createShaderModule(const std::string &name,
-                                    const std::string &entry_point_name) {
+std::optional<VkShaderModule> PipelineManager::createShaderModule(
+    const std::string &name, const std::string &entry_point_name,
+    std::vector<uint32_t> &out_spv_shader_data) {
 
   const std::string total_file_path = _shader_path + "/" + name;
 
@@ -77,12 +88,10 @@ PipelineManager::createShaderModule(const std::string &name,
     return magic == 0x07230203;
   }();
 
-  std::vector<uint32_t> spirv_data = {};
-
 #ifndef PRODUCTION_BUILD
 
   if (!isSpv) {
-    if (!slangToSpv(name, entry_point_name, spirv_data)) {
+    if (!slangToSpv(name, entry_point_name, out_spv_shader_data)) {
       return std::nullopt;
     }
   }
@@ -104,11 +113,11 @@ PipelineManager::createShaderModule(const std::string &name,
 
     size_t file_size = (size_t)file.tellg();
 
-    spirv_data.resize(file_size / sizeof(uint32_t));
+    out_spv_shader_data.resize(file_size / sizeof(uint32_t));
 
     file.seekg(0);
 
-    file.read((char *)spirv_data.data(), file_size);
+    file.read((char *)out_spv_shader_data.data(), file_size);
 
     file.close();
   }
@@ -117,8 +126,8 @@ PipelineManager::createShaderModule(const std::string &name,
   create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   create_info.pNext = nullptr;
 
-  create_info.codeSize = spirv_data.size() * sizeof(uint32_t);
-  create_info.pCode = spirv_data.data();
+  create_info.codeSize = out_spv_shader_data.size() * sizeof(uint32_t);
+  create_info.pCode = out_spv_shader_data.data();
 
   VkShaderModule shader_module;
 
@@ -383,8 +392,7 @@ void PipelineBuilder::enableBlendingAlphaBlend() {
   _color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
 
-void PipelineBuilder2::makeGraphicsDefault(
-    std::span<VkDescriptorSetLayoutBinding> bindings) {
+void PipelineBuilder2::makeGraphicsDefault() {
 
   PipelineBuilder2 &builder = *this;
 
@@ -444,4 +452,294 @@ void PipelineBuilder2::makeGraphicsDefault(
   builder.color_blend_info.logicOp = VK_LOGIC_OP_COPY;
   builder.color_blend_info.attachmentCount = 1;
   builder.color_blend_info.pAttachments = &builder.color_blend_attachment;
+}
+
+size_t PipelineManager::createGraphicsPipeline(
+    PipelineBuilder2 pipeline_builder,
+    std::array<std::string, 4> shader_modules_name_and_entry_point) {
+
+  std::vector<uint32_t> vertex_spv_data{};
+  std::vector<uint32_t> frag_spv_data{};
+
+  const std::string &vertex_shader_name =
+      shader_modules_name_and_entry_point[0];
+  const std::string &vertex_shader_entry =
+      shader_modules_name_and_entry_point[1];
+  const std::string &frag_shader_name = shader_modules_name_and_entry_point[2];
+  const std::string &frag_shader_entry = shader_modules_name_and_entry_point[3];
+
+  auto vertex_module_res = createShaderModule(
+      vertex_shader_name, vertex_shader_entry, vertex_spv_data);
+
+  auto frag_module_res =
+      createShaderModule(frag_shader_name, frag_shader_entry, frag_spv_data);
+
+  if (!vertex_module_res.has_value() || !frag_module_res.has_value()) {
+    return SIZE_MAX;
+  }
+
+  VkShaderModule vertex_module = vertex_module_res.value();
+  VkShaderModule frag_module = frag_module_res.value();
+
+  // Use for Input Data Reflection
+  spirv_cross::Compiler vertex_comp(std::move(vertex_spv_data));
+  spirv_cross::Compiler frag_comp(std::move(frag_spv_data));
+
+  auto vertex_active = vertex_comp.get_active_interface_variables();
+  auto frag_active = frag_comp.get_active_interface_variables();
+
+  vertex_comp.set_enabled_interface_variables(vertex_active);
+  frag_comp.set_enabled_interface_variables(frag_active);
+
+  spirv_cross::ShaderResources vertex_res =
+      vertex_comp.get_shader_resources(vertex_active);
+  spirv_cross::ShaderResources frag_res =
+      frag_comp.get_shader_resources(frag_active);
+
+  VkPushConstantRange range{};
+  range.offset = 0;
+  range.size = 128;
+  range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+  std::unordered_map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
+      descriptor_set_bindings{};
+
+  auto add_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType type,
+                         VkShaderStageFlags stage) {
+    auto &b = descriptor_set_bindings[set][binding];
+    b.binding = binding;
+    b.descriptorType = type;
+    b.descriptorCount = 1;
+    b.stageFlags |= stage;
+  };
+
+  for (auto &u : vertex_res.uniform_buffers) {
+
+    uint32_t set =
+        vertex_comp.get_decoration(u.id, spv::DecorationDescriptorSet);
+    uint32_t binding = vertex_comp.get_decoration(u.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &u : frag_res.uniform_buffers) {
+
+    uint32_t set = frag_comp.get_decoration(u.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(u.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  for (auto &s : vertex_res.storage_buffers) {
+
+    uint32_t set =
+        vertex_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
+    uint32_t binding = vertex_comp.get_decoration(s.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &s : frag_res.storage_buffers) {
+
+    uint32_t set = frag_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(s.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  for (auto &i : vertex_res.sampled_images) {
+    uint32_t set =
+        vertex_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
+    uint32_t binding = vertex_comp.get_decoration(i.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &i : frag_res.sampled_images) {
+    uint32_t set = frag_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(i.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  for (auto &s : vertex_res.separate_samplers) {
+    uint32_t set =
+        vertex_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
+    uint32_t binding = vertex_comp.get_decoration(s.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLER,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &s : frag_res.separate_samplers) {
+    uint32_t set = frag_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(s.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLER,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  for (auto &i : vertex_res.separate_images) {
+    uint32_t set =
+        vertex_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
+    uint32_t binding = vertex_comp.get_decoration(i.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &i : frag_res.separate_images) {
+    uint32_t set = frag_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(i.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  for (auto &img : vertex_res.storage_images) {
+    uint32_t set =
+        vertex_comp.get_decoration(img.id, spv::DecorationDescriptorSet);
+    uint32_t binding =
+        vertex_comp.get_decoration(img.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_SHADER_STAGE_VERTEX_BIT);
+  }
+
+  for (auto &img : frag_res.storage_images) {
+    uint32_t set =
+        frag_comp.get_decoration(img.id, spv::DecorationDescriptorSet);
+    uint32_t binding = frag_comp.get_decoration(img.id, spv::DecorationBinding);
+
+    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
+  std::unordered_map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>>
+      final_set_layout_bindings;
+
+  for (auto &set : descriptor_set_bindings) {
+    auto &vec = final_set_layout_bindings[set.first];
+
+    for (auto &binding : set.second) {
+
+      vec.push_back(binding.second);
+    }
+  }
+
+  uint64_t key = generateDescriptorSetLayoutHashKey(final_set_layout_bindings);
+
+  auto it = _set_layouts.find(key);
+
+  std::vector<VkDescriptorSetLayout> layouts{};
+
+  if (it == _set_layouts.end()) {
+
+    for (auto &pair : final_set_layout_bindings) {
+      uint32_t setIndex = pair.first;
+      std::vector<VkDescriptorSetLayoutBinding> &set_bindings = pair.second;
+
+      std::sort(set_bindings.begin(), set_bindings.end(),
+                [](const VkDescriptorSetLayoutBinding &a,
+                   const VkDescriptorSetLayoutBinding &b) {
+                  return a.binding < b.binding;
+                });
+
+      VkDescriptorSetLayoutCreateInfo create_info{};
+      create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      create_info.bindingCount = static_cast<uint32_t>(set_bindings.size());
+      create_info.pBindings = set_bindings.data();
+
+      VkDescriptorSetLayout layout;
+      VK_ERROR(
+          vkCreateDescriptorSetLayout(_device, &create_info, nullptr, &layout),
+          "Create Set Layout");
+
+      layouts.push_back(layout);
+    }
+
+    _set_layouts.insert_or_assign(key, layouts);
+  } else {
+
+    layouts = it->second;
+  }
+
+  Pipeline new_pipeline{};
+
+  VkPipelineLayoutCreateInfo pipeline_layout_create_info{};
+  pipeline_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeline_layout_create_info.setLayoutCount = layouts.size();
+  pipeline_layout_create_info.pSetLayouts = layouts.data();
+  pipeline_layout_create_info.pushConstantRangeCount = 1;
+  pipeline_layout_create_info.pPushConstantRanges = &range;
+
+  VK_ERROR(vkCreatePipelineLayout(_device, &pipeline_layout_create_info,
+                                  nullptr, &new_pipeline.layout),
+           "Create Pipeline Layout");
+
+  VkPipelineShaderStageCreateInfo stages[2] = {
+      {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+       VK_SHADER_STAGE_VERTEX_BIT, vertex_module, nullptr},
+      {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+       VK_SHADER_STAGE_FRAGMENT_BIT, frag_module, nullptr},
+  };
+
+  VkGraphicsPipelineCreateInfo graphics_pipeline_create_info{};
+  graphics_pipeline_create_info.sType =
+      VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  graphics_pipeline_create_info.pVertexInputState =
+      &pipeline_builder.vertex_info;
+  graphics_pipeline_create_info.pInputAssemblyState =
+      &pipeline_builder.assembly_info;
+  graphics_pipeline_create_info.pViewportState =
+      &pipeline_builder.viewport_info;
+  graphics_pipeline_create_info.pRasterizationState =
+      &pipeline_builder.rasterization_info;
+  graphics_pipeline_create_info.pMultisampleState =
+      &pipeline_builder.multisample_info;
+  graphics_pipeline_create_info.pDepthStencilState = VK_NULL_HANDLE;
+  graphics_pipeline_create_info.pColorBlendState =
+      &pipeline_builder.color_blend_info;
+  graphics_pipeline_create_info.pDynamicState = &pipeline_builder.dynamic_info;
+  graphics_pipeline_create_info.pStages = stages;
+  graphics_pipeline_create_info.stageCount = 2;
+  graphics_pipeline_create_info.layout = new_pipeline.layout;
+  graphics_pipeline_create_info.pNext = &;
+}
+
+uint64_t PipelineManager::generateDescriptorSetLayoutHashKey(
+    const std::unordered_map<
+        uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets) const {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+
+  auto fnv1a_combine = [](uint64_t h, uint64_t v) -> uint64_t {
+    return (h ^ v) * 0x100000001b3ULL;
+  };
+
+  for (auto &pair : sets) {
+    uint32_t setNumber = pair.first;
+    auto vec = pair.second;
+    std::sort(vec.begin(), vec.end(),
+              [](const VkDescriptorSetLayoutBinding &a,
+                 const VkDescriptorSetLayoutBinding &b) {
+                return a.binding < b.binding;
+              });
+    hash = fnv1a_combine(hash, setNumber);
+    for (auto &b : vec) {
+      uint64_t v = 0;
+      v |= static_cast<uint64_t>(b.binding) & 0xFF;
+      v |= (static_cast<uint64_t>(b.descriptorType) & 0xFF) << 8;
+      v |= (static_cast<uint64_t>(b.descriptorCount) & 0xFFFF) << 16;
+      v |= (static_cast<uint64_t>(b.stageFlags) & 0xFFFF) << 32;
+      hash = fnv1a_combine(hash, v);
+    }
+  }
+  return hash;
 }

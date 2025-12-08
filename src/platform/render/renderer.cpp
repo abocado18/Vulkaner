@@ -548,8 +548,6 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
     }
   }
 
-  
-
   VK_CHECK(vkWaitForFences(_device, 1, &getCurrentFrame()._render_fence, true,
                            UINT64_MAX),
            "Wait for Fence");
@@ -663,23 +661,13 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
       Buffer source_buffer = w.source_buffer;
 
       getCurrentFrame()._deletion_queue.pushFunction([source_buffer, this]() {
-
-
-        vmaDestroyBuffer(_allocator, source_buffer.buffer, source_buffer.allocation);
-
+        vmaDestroyBuffer(_allocator, source_buffer.buffer,
+                         source_buffer.allocation);
       });
     }
 
     _resource_manager->_deletion_queue.pushFunction(
-        [](ResourceManager *manager) {
-        
-
-          manager->clearWrites();
-        });
-
-        
-
-        
+        [](ResourceManager *manager) { manager->clearWrites(); });
 
     vkEndCommandBuffer(transfer_command_buffer);
 
@@ -848,8 +836,9 @@ void Renderer::initBackgroundPipelines() {
                                   &_gradient_pipeline_layout),
            "Create Gtadient Layout");
 
+  std::vector<uint32_t> e{};
   auto res =
-      _pipeline_manager->createShaderModule("compute.slang", "computeMain");
+      _pipeline_manager->createShaderModule("compute.slang", "computeMain", e);
 
   if (!res.has_value()) {
     std::cout << "COuld not get Gradient";
@@ -979,9 +968,9 @@ ResourceHandle Renderer::createBuffer(size_t size,
   return _resource_manager->createBuffer(size, usage_flags);
 }
 
-BufferHandle Renderer::writeBuffer(ResourceHandle handle, void *data, uint32_t size,
-                               uint32_t offset,
-                               VkAccessFlags new_buffer_access_flags) {
+BufferHandle Renderer::writeBuffer(ResourceHandle handle, void *data,
+                                   uint32_t size, uint32_t offset,
+                                   VkAccessFlags new_buffer_access_flags) {
 
   return _resource_manager->writeBuffer(handle, data, size, offset,
                                         new_buffer_access_flags);
