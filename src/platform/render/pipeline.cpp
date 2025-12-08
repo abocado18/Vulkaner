@@ -452,6 +452,28 @@ void PipelineBuilder2::makeGraphicsDefault() {
   builder.color_blend_info.logicOp = VK_LOGIC_OP_COPY;
   builder.color_blend_info.attachmentCount = 1;
   builder.color_blend_info.pAttachments = &builder.color_blend_attachment;
+
+  builder.color_rendering_formats = {VK_FORMAT_R16G16B16A16_SFLOAT};
+
+  builder.rendering_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  builder.rendering_info.colorAttachmentCount =
+      builder.color_rendering_formats.size();
+  builder.rendering_info.viewMask = 0;
+  builder.rendering_info.pColorAttachmentFormats =
+      builder.color_rendering_formats.data();
+  builder.rendering_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+  builder.rendering_info.stencilAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+
+  builder.depth_stencil_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  builder.depth_stencil_info.depthWriteEnable = VK_TRUE;
+  builder.depth_stencil_info.depthTestEnable = VK_TRUE;
+  builder.depth_stencil_info.depthBoundsTestEnable = VK_FALSE;
+  builder.depth_stencil_info.maxDepthBounds = 1.0f;
+  builder.depth_stencil_info.minDepthBounds = 0.0f;
+  builder.depth_stencil_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+  builder.depth_stencil_info.stencilTestEnable = VK_FALSE;
 }
 
 size_t PipelineManager::createGraphicsPipeline(
@@ -501,7 +523,7 @@ size_t PipelineManager::createGraphicsPipeline(
   range.size = 128;
   range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-  std::unordered_map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
+  std::map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
       descriptor_set_bindings{};
 
   auto add_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType type,
@@ -621,7 +643,7 @@ size_t PipelineManager::createGraphicsPipeline(
                 VK_SHADER_STAGE_FRAGMENT_BIT);
   }
 
-  std::unordered_map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>>
+  std::map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>>
       final_set_layout_bindings;
 
   for (auto &set : descriptor_set_bindings) {
@@ -640,6 +662,13 @@ size_t PipelineManager::createGraphicsPipeline(
   std::vector<VkDescriptorSetLayout> layouts{};
 
   if (it == _set_layouts.end()) {
+
+    uint32_t max_set_index = 0;
+    for (auto &pair : final_set_layout_bindings) {
+      max_set_index = std::max(max_set_index, pair.first);
+    }
+
+    layouts.resize(max_set_index + 1, VK_NULL_HANDLE);
 
     for (auto &pair : final_set_layout_bindings) {
       uint32_t setIndex = pair.first;
@@ -661,10 +690,11 @@ size_t PipelineManager::createGraphicsPipeline(
           vkCreateDescriptorSetLayout(_device, &create_info, nullptr, &layout),
           "Create Set Layout");
 
-      layouts.push_back(layout);
+      layouts[setIndex] = layout;
     }
 
     _set_layouts.insert_or_assign(key, layouts);
+
   } else {
 
     layouts = it->second;
@@ -704,19 +734,28 @@ size_t PipelineManager::createGraphicsPipeline(
       &pipeline_builder.rasterization_info;
   graphics_pipeline_create_info.pMultisampleState =
       &pipeline_builder.multisample_info;
-  graphics_pipeline_create_info.pDepthStencilState = VK_NULL_HANDLE;
+  graphics_pipeline_create_info.pDepthStencilState =
+      &pipeline_builder.depth_stencil_info;
   graphics_pipeline_create_info.pColorBlendState =
       &pipeline_builder.color_blend_info;
   graphics_pipeline_create_info.pDynamicState = &pipeline_builder.dynamic_info;
   graphics_pipeline_create_info.pStages = stages;
   graphics_pipeline_create_info.stageCount = 2;
   graphics_pipeline_create_info.layout = new_pipeline.layout;
-  graphics_pipeline_create_info.pNext = &;
+  graphics_pipeline_create_info.pNext = &pipeline_builder.rendering_info;
+
+  VK_ERROR(vkCreateGraphicsPipelines(_device, VK_NULL_HANDLE, 1,
+                                     &graphics_pipeline_create_info, nullptr,
+                                     &new_pipeline.pipeline),
+           "Create Graphics Pipeline");
+
+  _pipelines.push_back(new_pipeline);
+  return _pipelines.size();
 }
 
 uint64_t PipelineManager::generateDescriptorSetLayoutHashKey(
-    const std::unordered_map<
-        uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets) const {
+    const std::map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets)
+    const {
   uint64_t hash = 0xcbf29ce484222325ULL;
 
   auto fnv1a_combine = [](uint64_t h, uint64_t v) -> uint64_t {

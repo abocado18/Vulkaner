@@ -7,6 +7,7 @@
 #include "volk.h"
 #include "vulkan/vulkan_core.h"
 #include <deque>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -77,12 +78,16 @@ public:
   VkPipelineColorBlendAttachmentState color_blend_attachment{};
   VkPipelineColorBlendStateCreateInfo color_blend_info{};
 
+  VkPipelineDepthStencilStateCreateInfo depth_stencil_info{};
+
   std::array<VkVertexInputAttributeDescription, 5> vertex_attribute_desc;
   std::array<VkVertexInputBindingDescription, 1> vertex_binding_desc;
 
   std::vector<VkDynamicState> dynamic_states{};
 
-  VkPipelineLayout layout;
+  std::vector<VkFormat> color_rendering_formats{};
+
+  VkPipelineRenderingCreateInfo rendering_info{};
 
   PipelineBuilder2() {}
 
@@ -107,7 +112,7 @@ public:
 
 private:
   uint64_t generateDescriptorSetLayoutHashKey(
-      const std::unordered_map<
+      const std::map<
           uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets) const;
 
 #ifndef PRODUCTION_BUILD
@@ -120,12 +125,13 @@ private:
 
 #endif
 
-  std::unordered_map<uint64_t, std::vector<VkDescriptorSetLayout>>
-      _set_layouts{};
+  std::map<uint64_t, std::vector<VkDescriptorSetLayout>> _set_layouts{};
 
   bool runtime_compilation_possible;
 
   const std::string _shader_path;
+
+  std::vector<Pipeline> _pipelines{};
 
   VkDevice &_device;
 };
