@@ -676,7 +676,6 @@ uint64_t PipelineManager::generateDescriptorSetLayoutHashKey(
     hash = fnv1a_combine(hash, setNumber);
     for (auto &b : vec) {
       uint64_t v = 0;
-      uint64_t v = 0;
       v |= static_cast<uint64_t>(b.binding);
       v |= static_cast<uint64_t>(b.descriptorType) << 32;
       v |= static_cast<uint64_t>(b.descriptorCount) << 40;
