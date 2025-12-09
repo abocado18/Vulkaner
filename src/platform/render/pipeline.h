@@ -112,8 +112,15 @@ public:
 
 private:
   uint64_t generateDescriptorSetLayoutHashKey(
-      const std::map<
-          uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets) const;
+      const std::map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>> &sets)
+      const;
+
+  void getDescriptorSetLayoutBindingsFromCross(
+      spirv_cross::Compiler &comp,
+      spirv_cross::ShaderResources &available_resources,
+      VkShaderStageFlags shader_stages,
+      std::map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
+          &out_binding_map);
 
 #ifndef PRODUCTION_BUILD
 
@@ -125,7 +132,7 @@ private:
 
 #endif
 
-  std::map<uint64_t, std::vector<VkDescriptorSetLayout>> _set_layouts{};
+  std::map<uint32_t, std::vector<VkDescriptorSetLayout>> _set_layouts{};
 
   bool runtime_compilation_possible;
 

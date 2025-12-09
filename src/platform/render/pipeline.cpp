@@ -3,7 +3,9 @@
 #include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "spirv.hpp"
+#include "spirv_common.hpp"
 #include "spirv_cross.hpp"
+#include "spirv_cross_containers.hpp"
 #include "vulkan/vulkan_core.h"
 #include <array>
 #include <cstddef>
@@ -14,7 +16,6 @@
 #include <optional>
 #include <string>
 #include <sys/types.h>
-#include <unordered_map>
 #include <vector>
 
 #include <algorithm>
@@ -526,122 +527,13 @@ size_t PipelineManager::createGraphicsPipeline(
   std::map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
       descriptor_set_bindings{};
 
-  auto add_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType type,
-                         VkShaderStageFlags stage) {
-    auto &b = descriptor_set_bindings[set][binding];
-    b.binding = binding;
-    b.descriptorType = type;
-    b.descriptorCount = 1;
-    b.stageFlags |= stage;
-  };
+  getDescriptorSetLayoutBindingsFromCross(vertex_comp, vertex_res,
+                                          VK_SHADER_STAGE_VERTEX_BIT,
+                                          descriptor_set_bindings);
 
-  for (auto &u : vertex_res.uniform_buffers) {
-
-    uint32_t set =
-        vertex_comp.get_decoration(u.id, spv::DecorationDescriptorSet);
-    uint32_t binding = vertex_comp.get_decoration(u.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &u : frag_res.uniform_buffers) {
-
-    uint32_t set = frag_comp.get_decoration(u.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(u.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
-
-  for (auto &s : vertex_res.storage_buffers) {
-
-    uint32_t set =
-        vertex_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
-    uint32_t binding = vertex_comp.get_decoration(s.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &s : frag_res.storage_buffers) {
-
-    uint32_t set = frag_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(s.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
-
-  for (auto &i : vertex_res.sampled_images) {
-    uint32_t set =
-        vertex_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
-    uint32_t binding = vertex_comp.get_decoration(i.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &i : frag_res.sampled_images) {
-    uint32_t set = frag_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(i.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
-
-  for (auto &s : vertex_res.separate_samplers) {
-    uint32_t set =
-        vertex_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
-    uint32_t binding = vertex_comp.get_decoration(s.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLER,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &s : frag_res.separate_samplers) {
-    uint32_t set = frag_comp.get_decoration(s.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(s.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLER,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
-
-  for (auto &i : vertex_res.separate_images) {
-    uint32_t set =
-        vertex_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
-    uint32_t binding = vertex_comp.get_decoration(i.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &i : frag_res.separate_images) {
-    uint32_t set = frag_comp.get_decoration(i.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(i.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
-
-  for (auto &img : vertex_res.storage_images) {
-    uint32_t set =
-        vertex_comp.get_decoration(img.id, spv::DecorationDescriptorSet);
-    uint32_t binding =
-        vertex_comp.get_decoration(img.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                VK_SHADER_STAGE_VERTEX_BIT);
-  }
-
-  for (auto &img : frag_res.storage_images) {
-    uint32_t set =
-        frag_comp.get_decoration(img.id, spv::DecorationDescriptorSet);
-    uint32_t binding = frag_comp.get_decoration(img.id, spv::DecorationBinding);
-
-    add_binding(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                VK_SHADER_STAGE_FRAGMENT_BIT);
-  }
+  getDescriptorSetLayoutBindingsFromCross(frag_comp, frag_res,
+                                          VK_SHADER_STAGE_FRAGMENT_BIT,
+                                          descriptor_set_bindings);
 
   std::map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>>
       final_set_layout_bindings;
@@ -693,6 +585,17 @@ size_t PipelineManager::createGraphicsPipeline(
       layouts[setIndex] = layout;
     }
 
+    for (auto &l : layouts) {
+      if (l == VK_NULL_HANDLE) {
+        VkDescriptorSetLayoutCreateInfo empty_info{};
+        empty_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        empty_info.bindingCount = 0;
+        empty_info.pBindings = nullptr;
+        VK_ERROR(vkCreateDescriptorSetLayout(_device, &empty_info, nullptr, &l),
+                 "Create empty Set Layout");
+      }
+    }
+
     _set_layouts.insert_or_assign(key, layouts);
 
   } else {
@@ -716,9 +619,9 @@ size_t PipelineManager::createGraphicsPipeline(
 
   VkPipelineShaderStageCreateInfo stages[2] = {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-       VK_SHADER_STAGE_VERTEX_BIT, vertex_module, nullptr},
+       VK_SHADER_STAGE_VERTEX_BIT, vertex_module, vertex_shader_entry.c_str()},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-       VK_SHADER_STAGE_FRAGMENT_BIT, frag_module, nullptr},
+       VK_SHADER_STAGE_FRAGMENT_BIT, frag_module, frag_shader_entry.c_str()},
   };
 
   VkGraphicsPipelineCreateInfo graphics_pipeline_create_info{};
@@ -773,12 +676,76 @@ uint64_t PipelineManager::generateDescriptorSetLayoutHashKey(
     hash = fnv1a_combine(hash, setNumber);
     for (auto &b : vec) {
       uint64_t v = 0;
-      v |= static_cast<uint64_t>(b.binding) & 0xFF;
-      v |= (static_cast<uint64_t>(b.descriptorType) & 0xFF) << 8;
-      v |= (static_cast<uint64_t>(b.descriptorCount) & 0xFFFF) << 16;
-      v |= (static_cast<uint64_t>(b.stageFlags) & 0xFFFF) << 32;
+      uint64_t v = 0;
+      v |= static_cast<uint64_t>(b.binding);
+      v |= static_cast<uint64_t>(b.descriptorType) << 32;
+      v |= static_cast<uint64_t>(b.descriptorCount) << 40;
+      v |= static_cast<uint64_t>(b.stageFlags) << 48;
       hash = fnv1a_combine(hash, v);
     }
   }
   return hash;
+}
+
+void PipelineManager::getDescriptorSetLayoutBindingsFromCross(
+    spirv_cross::Compiler &comp,
+    spirv_cross::ShaderResources &available_resources,
+    VkShaderStageFlags shader_stages,
+    std::map<uint32_t, std::map<uint32_t, VkDescriptorSetLayoutBinding>>
+        &out_binding_map) {
+
+  auto addBinding = [&](uint32_t set, uint32_t binding, VkDescriptorType type,
+                        VkShaderStageFlags stage, uint32_t descriptor_count) {
+    VkDescriptorSetLayoutBinding b{};
+    b.binding = binding;
+    b.descriptorType = type;
+    b.descriptorCount = descriptor_count;
+    b.stageFlags = stage;
+
+    auto &exists = out_binding_map[set][binding];
+
+    if (exists.descriptorType == 0 && exists.stageFlags == 0 &&
+        exists.descriptorCount == 0) {
+      exists = b;
+    } else {
+      exists.stageFlags |= stage;
+      exists.descriptorCount =
+          std::max(exists.descriptorCount, b.descriptorCount);
+    }
+  };
+
+  auto addResourcesToMap =
+      [&](spirv_cross::SmallVector<spirv_cross::Resource> &resources,
+          VkDescriptorType descriptor_type) {
+        for (const auto &r : resources) {
+
+          uint32_t set =
+              comp.get_decoration(r.id, spv::DecorationDescriptorSet);
+          uint32_t binding = comp.get_decoration(r.id, spv::DecorationBinding);
+
+          uint32_t descriptor_count = 1;
+
+          const spirv_cross::SPIRType &type = comp.get_type(r.type_id);
+
+          if (!type.array.empty()) {
+            descriptor_count = type.array[0];
+          }
+
+          addBinding(set, binding, descriptor_type, shader_stages,
+                     descriptor_count);
+        }
+      };
+
+  addResourcesToMap(available_resources.uniform_buffers,
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
+  addResourcesToMap(available_resources.storage_buffers,
+                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC);
+  addResourcesToMap(available_resources.sampled_images,
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+  addResourcesToMap(available_resources.storage_images,
+                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+  addResourcesToMap(available_resources.separate_images,
+                    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+  addResourcesToMap(available_resources.separate_samplers,
+                    VK_DESCRIPTOR_TYPE_SAMPLER);
 }
