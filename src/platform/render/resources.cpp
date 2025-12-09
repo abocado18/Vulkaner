@@ -286,6 +286,16 @@ ResourceManager::ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
 ResourceManager::~ResourceManager() {
 
   _dynamic_allocator.destroyPools(_device);
+
+  resetAllTransientImages();
+
+  for (auto &pair : free_transient_images) {
+    auto &images = pair.second;
+
+    for (auto &img : images) {
+      vkDestroyImageView(_device, img.view, nullptr);
+    }
+  }
 };
 
 void ResourceManager::runDeletionQueue() { _deletion_queue.flush(this); }
@@ -624,7 +634,9 @@ ResourceHandle ResourceManager::createImage(
   image.extent = create_info.extent;
   image.format = image_format;
   image.mip_map_number = create_info.mipLevels;
+  image.array_layers = create_info.arrayLayers;
   image.aspect_mask = aspect_mask;
+  image.image_usage = image_usage;
 
   {
     VkImageViewCreateInfo view_create_info = vk_utils::imageViewCreateInfo(
@@ -734,4 +746,102 @@ const Image &ResourceManager::getImage(size_t idx) {
 
   std::cerr << "Not a Buffer\n";
   std::abort();
+}
+
+Image ResourceManager::getTransientImage(const std::string &name) {
+
+  TransientImageKey &key = transient_virtual_images.at(name);
+
+  auto &images = free_transient_images[key];
+
+  size_t i = 0;
+  bool found = false;
+
+  for (auto &img : images) {
+
+    if ((img.image_usage & key.image_usage) == key.image_usage) {
+
+      found = true;
+      break;
+    }
+
+    i++;
+  }
+
+  if (found) {
+
+    Image found_image = images[i];
+
+    images[i] = images.back();
+    images.pop_back();
+
+    used_transient_images[name] = {key, found_image};
+
+    return found_image;
+  }
+
+  VkImageCreateInfo create_info{};
+  create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+
+  create_info.imageType = key.image_type;
+  create_info.extent = key.extent;
+  create_info.mipLevels = key.mip_levels;
+
+  create_info.arrayLayers = key.array_layers;
+  create_info.format = key.format;
+  create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  create_info.usage = key.image_usage;
+  create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  alloc_info.priority = 1.0f;
+
+  Image new_image;
+
+  VK_ERROR(vmaCreateImage(_allocator, &create_info, &alloc_info,
+                          &new_image.image, &new_image.allocation,
+                          &new_image.allocation_info),
+           "Create Image");
+
+  new_image.image_usage = key.image_usage;
+  new_image.aspect_mask = key.aspect_mask;
+  new_image.current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+  new_image.extent = key.extent;
+  new_image.format = key.format;
+  new_image.mip_map_number = key.mip_levels;
+  new_image.array_layers = key.array_layers;
+
+  {
+    VkImageViewCreateInfo view_create_info = vk_utils::imageViewCreateInfo(
+        key.format, new_image.image, key.aspect_mask, key.view_type);
+
+    VK_ERROR(
+        vkCreateImageView(_device, &view_create_info, nullptr, &new_image.view),
+        "Create View");
+  }
+
+  used_transient_images[name] = {key, new_image};
+
+  return new_image;
+}
+
+void ResourceManager::registerTransientImage(const std::string &name,
+                                             TransientImageKey &key) {
+
+  transient_virtual_images[name] = key;
+}
+
+void ResourceManager::resetAllTransientImages() {
+
+  for (auto &p : used_transient_images) {
+
+    auto &key = p.second.first;
+    auto &img = p.second.second;
+
+    free_transient_images[key].push_back(img);
+  }
+
+  used_transient_images.clear();
 }

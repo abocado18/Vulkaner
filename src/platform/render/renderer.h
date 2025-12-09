@@ -148,8 +148,7 @@ private:
   VkDescriptorSet _draw_image_descriptors;
   VkDescriptorSetLayout _draw_image_descriptor_layout;
 
-  VkPipelineLayout _gradient_pipeline_layout;
-  VkPipeline _gradient_pipeline;
+
 
   VkDescriptorPool _imm_pool;
 
@@ -181,8 +180,7 @@ private:
 
   void initDescriptors();
 
-  void initPipelines();
-  void initBackgroundPipelines();
+
 
   void initImgui();
 

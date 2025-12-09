@@ -95,9 +95,12 @@ struct Image {
 
   VkImageLayout current_layout;
 
+  VkImageUsageFlags image_usage;
+
   VkExtent3D extent;
 
   uint32_t mip_map_number;
+  uint32_t array_layers;
 };
 
 struct Buffer {
@@ -220,6 +223,52 @@ struct ResourceWriteInfo {
   } buffer_write_data;
 };
 
+struct TransientImageKey {
+
+  VkFormat format{};
+  VkExtent3D extent{};
+  VkImageType image_type{};
+  VkImageUsageFlags image_usage{};
+  VkImageAspectFlags aspect_mask{};
+  VkImageViewType view_type{};
+  uint32_t mip_levels{};
+  uint32_t array_layers{};
+
+  const bool operator=(const TransientImageKey &other) const {
+    return format == other.format && extent.width == other.extent.width &&
+           extent.height == other.extent.height &&
+           extent.depth == other.extent.depth &&
+           image_type == other.image_type && image_usage == other.image_usage &&
+           view_type == other.view_type && aspect_mask == other.aspect_mask &&
+           mip_levels == other.mip_levels && array_layers == other.array_layers;
+  };
+};
+
+namespace std {
+template <> struct hash<TransientImageKey> {
+  size_t operator()(const TransientImageKey &key) const noexcept {
+    size_t h = 0;
+    h ^= std::hash<int>{}(key.format) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    //   h ^= std::hash<int>{}(key.image_type) + 0x9e3779b9 + (h << 6) + (h >>
+    //   2);
+    h ^= std::hash<int>{}(key.image_usage) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<int>{}(key.view_type) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<int>{}(key.aspect_mask) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<uint32_t>{}(key.mip_levels) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+    h ^= std::hash<uint32_t>{}(key.array_layers) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+    h ^= std::hash<uint32_t>{}(key.extent.width) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+    h ^= std::hash<uint32_t>{}(key.extent.height) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+    h ^= std::hash<uint32_t>{}(key.extent.depth) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+    return h;
+  }
+};
+} // namespace std
+
 class ResourceManager {
 
 public:
@@ -267,22 +316,26 @@ public:
 
   const std::vector<ResourceWriteInfo> &getWrites() const { return writes; }
 
-  void clearWrites() { 
-    
-    
-    
-    
-    
-    
-    
-    writes.clear(); 
-  
-  
-  }
+  void clearWrites() { writes.clear(); }
+
+  void registerTransientImage(const std::string &name, TransientImageKey &key);
+
+  void resetAllTransientImages();
 
 private:
-  std::unordered_map<size_t, std::weak_ptr<Resource>> resources;
-  std::unordered_map<std::string, size_t> resource_names;
+  std::unordered_map<size_t, std::weak_ptr<Resource>> resources{};
+  std::unordered_map<std::string, size_t> resource_names{};
+
+  // Caches created transient resources based on resource data
+  std::unordered_map<TransientImageKey, std::vector<Image>>
+      free_transient_images{};
+
+  std::unordered_map<std::string, std::pair<TransientImageKey, Image>>
+      used_transient_images{};
+
+  std::unordered_map<std::string, TransientImageKey> transient_virtual_images{};
+
+  Image getTransientImage(const std::string &name);
 
   DescriptorAllocatorGrowable _dynamic_allocator;
 

@@ -79,7 +79,7 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   initDescriptors();
 
-  initPipelines();
+
 
   initImgui();
 
@@ -205,16 +205,12 @@ bool Renderer::initVulkan() {
     features.dynamicRendering = true;
     features.synchronization2 = true;
 
-    VkPhysicalDeviceVulkan12Features features12{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    features12.bufferDeviceAddress = true;
-    features12.descriptorIndexing = true;
+ 
 
     vkb::PhysicalDeviceSelector selector(vkb_inst);
     vkb::PhysicalDevice physical_device =
         selector.set_minimum_version(1, 3)
             .set_required_features_13(features)
-            .set_required_features_12(features12)
             .set_surface(_surface)
 
             .select()
@@ -274,8 +270,6 @@ bool Renderer::initVulkan() {
     allocator_create_info.physicalDevice = _chosen_gpu;
     allocator_create_info.device = _device;
     allocator_create_info.instance = _instance;
-    allocator_create_info.flags =
-        VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     VmaVulkanFunctions vulkan_functions = {};
 
@@ -725,15 +719,7 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
   drawBackground(graphics_command_buffer);
 
-  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    _gradient_pipeline);
-  vkCmdBindDescriptorSets(
-      graphics_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      _gradient_pipeline_layout, 0, 1, &_draw_image_descriptors, 0, nullptr);
 
-  vkCmdDispatch(graphics_command_buffer,
-                std::ceil(_draw_image.extent.width / 16.0),
-                std::ceil(_draw_image.extent.height / 16.0), 1);
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -821,58 +807,12 @@ void Renderer::drawBackground(VkCommandBuffer cmd) {
 
   vkCmdClearColorImage(cmd, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
                        &clear_value, 1, &range);
+
+
+                       
 }
 
-void Renderer::initPipelines() { initBackgroundPipelines(); }
 
-void Renderer::initBackgroundPipelines() {
-  VkPipelineLayoutCreateInfo computeLayout{};
-  computeLayout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  computeLayout.pNext = nullptr;
-  computeLayout.pSetLayouts = &_draw_image_descriptor_layout;
-  computeLayout.setLayoutCount = 1;
-
-  VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr,
-                                  &_gradient_pipeline_layout),
-           "Create Gtadient Layout");
-
-  std::vector<uint32_t> e{};
-  auto res =
-      _pipeline_manager->createShaderModule("compute.slang", "computeMain", e);
-
-  if (!res.has_value()) {
-    std::cout << "COuld not get Gradient";
-    std::abort();
-  }
-
-  VkShaderModule g_shader_module = res.value();
-
-  VkPipelineShaderStageCreateInfo stageinfo{};
-  stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stageinfo.pNext = nullptr;
-  stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-  stageinfo.module = g_shader_module;
-  stageinfo.pName = "main";
-
-  VkComputePipelineCreateInfo computePipelineCreateInfo{};
-  computePipelineCreateInfo.sType =
-      VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-  computePipelineCreateInfo.pNext = nullptr;
-  computePipelineCreateInfo.layout = _gradient_pipeline_layout;
-  computePipelineCreateInfo.stage = stageinfo;
-
-  VK_ERROR(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1,
-                                    &computePipelineCreateInfo, nullptr,
-                                    &_gradient_pipeline),
-           "ff");
-
-  vkDestroyShaderModule(_device, g_shader_module, nullptr);
-
-  _main_deletion_queue.pushFunction([&]() {
-    vkDestroyPipelineLayout(_device, _gradient_pipeline_layout, nullptr);
-    vkDestroyPipeline(_device, _gradient_pipeline, nullptr);
-  });
-}
 
 void Renderer::initImgui() {
 
