@@ -1,6 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <iostream>
+#include <sys/types.h>
+
+
+constexpr uint32_t FRAMES_IN_FLIGHT = 2;
 
 #define VK_ERROR(result, message)                                              \
   do {                                                                         \

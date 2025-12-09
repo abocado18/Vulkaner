@@ -2,6 +2,7 @@
 
 #include "allocator/vk_mem_alloc.h"
 #include "platform/render/deletion_queue.h"
+#include "platform/render/vulkan_macros.h"
 #include "volk.h"
 #include <array>
 #include <cstddef>
@@ -234,7 +235,7 @@ struct TransientImageKey {
   uint32_t mip_levels{};
   uint32_t array_layers{};
 
-  const bool operator=(const TransientImageKey &other) const {
+  const bool operator==(const TransientImageKey &other) const {
     return format == other.format && extent.width == other.extent.width &&
            extent.height == other.extent.height &&
            extent.depth == other.extent.depth &&
@@ -318,24 +319,31 @@ public:
 
   void clearWrites() { writes.clear(); }
 
-  void registerTransientImage(const std::string &name, TransientImageKey &key);
+  void registerTransientImage(const std::string &name,
+                              const TransientImageKey &key);
 
-  void resetAllTransientImages();
+  void resetAllTransientImages(const uint32_t frame);
+
+  Image getTransientImage(const std::string &name, const uint32_t frame);
 
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources{};
   std::unordered_map<std::string, size_t> resource_names{};
 
   // Caches created transient resources based on resource data
-  std::unordered_map<TransientImageKey, std::vector<Image>>
-      free_transient_images{};
 
-  std::unordered_map<std::string, std::pair<TransientImageKey, Image>>
-      used_transient_images{};
+  struct TransientImagesCache {
+    std::unordered_map<TransientImageKey, std::vector<Image>>
+        free_transient_images{};
 
-  std::unordered_map<std::string, TransientImageKey> transient_virtual_images{};
+    std::unordered_map<std::string, std::pair<TransientImageKey, Image>>
+        used_transient_images{};
 
-  Image getTransientImage(const std::string &name);
+    std::unordered_map<std::string, TransientImageKey>
+        transient_virtual_images{};
+  };
+
+  std::array<TransientImagesCache, FRAMES_IN_FLIGHT> transient_images_cache{};
 
   DescriptorAllocatorGrowable _dynamic_allocator;
 

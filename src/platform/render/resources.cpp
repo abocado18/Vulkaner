@@ -287,13 +287,17 @@ ResourceManager::~ResourceManager() {
 
   _dynamic_allocator.destroyPools(_device);
 
-  resetAllTransientImages();
+  for (size_t i = 0; i < transient_images_cache.size(); i++) {
+    resetAllTransientImages(i);
+  }
 
-  for (auto &pair : free_transient_images) {
-    auto &images = pair.second;
+  for (auto &cache : transient_images_cache) {
+    for (auto &pair : cache.free_transient_images) {
+      auto &images = pair.second;
 
-    for (auto &img : images) {
-      vkDestroyImageView(_device, img.view, nullptr);
+      for (auto &img : images) {
+        vkDestroyImageView(_device, img.view, nullptr);
+      }
     }
   }
 };
@@ -748,11 +752,13 @@ const Image &ResourceManager::getImage(size_t idx) {
   std::abort();
 }
 
-Image ResourceManager::getTransientImage(const std::string &name) {
+Image ResourceManager::getTransientImage(const std::string &name,
+                                         const uint32_t frame) {
 
-  TransientImageKey &key = transient_virtual_images.at(name);
+  TransientImageKey &key =
+      transient_images_cache[frame].transient_virtual_images.at(name);
 
-  auto &images = free_transient_images[key];
+  auto &images = transient_images_cache[frame].free_transient_images[key];
 
   size_t i = 0;
   bool found = false;
@@ -775,7 +781,8 @@ Image ResourceManager::getTransientImage(const std::string &name) {
     images[i] = images.back();
     images.pop_back();
 
-    used_transient_images[name] = {key, found_image};
+    transient_images_cache[frame].used_transient_images[name] = {key,
+                                                                 found_image};
 
     return found_image;
   }
@@ -822,26 +829,30 @@ Image ResourceManager::getTransientImage(const std::string &name) {
         "Create View");
   }
 
-  used_transient_images[name] = {key, new_image};
+  transient_images_cache[frame].used_transient_images[name] = {key, new_image};
 
   return new_image;
 }
 
 void ResourceManager::registerTransientImage(const std::string &name,
-                                             TransientImageKey &key) {
+                                             const TransientImageKey &key) {
 
-  transient_virtual_images[name] = key;
+  for (auto &cache : transient_images_cache) {
+    cache.transient_virtual_images[name] = key;
+  }
 }
 
-void ResourceManager::resetAllTransientImages() {
+void ResourceManager::resetAllTransientImages(const uint32_t frame) {
 
-  for (auto &p : used_transient_images) {
+  auto &cache = transient_images_cache[frame];
+
+  for (auto &p : cache.used_transient_images) {
 
     auto &key = p.second.first;
     auto &img = p.second.second;
 
-    free_transient_images[key].push_back(img);
+    cache.free_transient_images[key].push_back(img);
   }
 
-  used_transient_images.clear();
+  cache.used_transient_images.clear();
 }

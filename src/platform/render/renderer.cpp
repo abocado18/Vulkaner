@@ -71,15 +71,12 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   initSwapchain();
 
-  initDrawImage();
 
   initCommands();
 
   initSyncStructures();
 
   initDescriptors();
-
-
 
   initImgui();
 
@@ -94,7 +91,7 @@ Renderer::~Renderer() {
 
     vkDeviceWaitIdle(_device);
 
-    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
 
       vkDestroyCommandPool(_device, _frames[i]._graphics_command_pool, nullptr);
 
@@ -145,33 +142,7 @@ void Renderer::initDescriptors() {
 
   _main_deletion_queue.pushFunction([&] { delete _resource_manager; });
 
-  std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-  };
-
-  _global_descriptor_allocator.init(_device, 10, sizes);
-  {
-    DescriptorSetLayoutBuilder builder;
-    builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    _draw_image_descriptor_layout =
-        builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
-  }
-
-  _draw_image_descriptors = _global_descriptor_allocator.allocate(
-      _device, _draw_image_descriptor_layout);
-
-  DescriptorWriter writer;
-  writer.writeImage(0, _draw_image.view, VK_NULL_HANDLE,
-                    VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-
-  writer.updateSet(_device, _draw_image_descriptors);
-
-  _main_deletion_queue.pushFunction([&]() {
-    _global_descriptor_allocator.destroyPools(_device);
-
-    vkDestroyDescriptorSetLayout(_device, _draw_image_descriptor_layout,
-                                 nullptr);
-  });
+  
 }
 
 bool Renderer::initVulkan() {
@@ -204,8 +175,6 @@ bool Renderer::initVulkan() {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     features.dynamicRendering = true;
     features.synchronization2 = true;
-
- 
 
     vkb::PhysicalDeviceSelector selector(vkb_inst);
     vkb::PhysicalDevice physical_device =
@@ -347,54 +316,13 @@ void Renderer::destroySwapchain() {
   vkDestroySwapchainKHR(_device, _swapchain, nullptr);
 }
 
-void Renderer::initDrawImage() {
-  {
-    VkExtent3D draw_image_extent = {_swapchain_extent.width,
-                                    _swapchain_extent.height, 1};
-
-    _draw_image.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    _draw_image.extent = draw_image_extent;
-
-    VkImageUsageFlags draw_usage_flags =
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-    VkImageCreateInfo draw_img_create_info = vk_utils::imageCreateInfo(
-        _draw_image.format, draw_usage_flags, draw_image_extent);
-
-    VmaAllocationCreateInfo draw_img_alloc_info = {};
-    draw_img_alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    draw_img_alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    VK_ERROR(vmaCreateImage(_allocator, &draw_img_create_info,
-                            &draw_img_alloc_info, &_draw_image.image,
-                            &_draw_image.allocation, nullptr),
-             "Could not create Draw Image");
-
-    VkImageViewCreateInfo draw_img_view_create_info =
-        vk_utils::imageViewCreateInfo(_draw_image.format, _draw_image.image,
-                                      VK_IMAGE_ASPECT_COLOR_BIT,
-                                      VK_IMAGE_VIEW_TYPE_2D);
-
-    VK_ERROR(vkCreateImageView(_device, &draw_img_view_create_info, nullptr,
-                               &_draw_image.view),
-             "Create Draw Image View");
-
-    _main_deletion_queue.pushFunction([&]() {
-      vkDestroyImageView(_device, _draw_image.view, nullptr);
-
-      vmaDestroyImage(_allocator, _draw_image.image, _draw_image.allocation);
-    });
-  }
-}
-
 void Renderer::initCommands() {
 
   VkCommandPoolCreateInfo graphics_pool_create_info = {};
   graphics_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   graphics_pool_create_info.queueFamilyIndex = _graphics_queue_family;
 
-  for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+  for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
     VK_ERROR(vkCreateCommandPool(_device, &graphics_pool_create_info, nullptr,
                                  &_frames[i]._graphics_command_pool),
              "Could not create Command Pool");
@@ -417,7 +345,7 @@ void Renderer::initCommands() {
     compute_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     compute_pool_create_info.queueFamilyIndex = _compute_queue_family;
 
-    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
       VK_ERROR(vkCreateCommandPool(_device, &compute_pool_create_info, nullptr,
                                    &_frames[i]._compute_command_pool),
                "Could not create Command Pool");
@@ -435,7 +363,7 @@ void Renderer::initCommands() {
     }
   } else {
 
-    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
       _frames[i]._compute_command_pool = _frames[i]._graphics_command_pool;
 
       VkCommandBufferAllocateInfo alloc_info = {};
@@ -458,7 +386,7 @@ void Renderer::initCommands() {
         VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     transfer_pool_create_info.queueFamilyIndex = _transfer_queue_family;
 
-    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
       VK_ERROR(vkCreateCommandPool(_device, &transfer_pool_create_info, nullptr,
                                    &_frames[i]._transfer_command_pool),
                "Could not create Command Pool");
@@ -476,7 +404,7 @@ void Renderer::initCommands() {
     }
   } else {
 
-    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
       _frames[i]._transfer_command_pool = _frames[i]._graphics_command_pool;
 
       VkCommandBufferAllocateInfo alloc_info = {};
@@ -502,7 +430,7 @@ void Renderer::initSyncStructures() {
   VkSemaphoreCreateInfo semaphore_create_info = {};
   semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-  for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+  for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
 
     VK_ERROR(vkCreateFence(_device, &fence_create_info, nullptr,
                            &_frames[i]._render_fence),
@@ -683,6 +611,23 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
 #pragma endregion
 
+  constexpr TransientImageKey draw_key = {
+
+      VK_FORMAT_B8G8R8A8_UNORM,
+      {1920, 1080, 1},
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      1,
+      1
+
+  };
+
+  _resource_manager->registerTransientImage("Draw", draw_key);
+
+  Image _draw_image = _resource_manager->getTransientImage("Draw", _frame_number % FRAMES_IN_FLIGHT);
+
   {
     VkCommandBufferBeginInfo begin_info = {};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -717,9 +662,19 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
                      0, 0, 0);
   }
 
-  drawBackground(graphics_command_buffer);
+  
 
+  {
+    VkClearColorValue clear_value = {};
 
+    clear_value = {{0.0f, 1.0f, 1.0f, 1.0f}};
+
+    VkImageSubresourceRange range =
+        vk_utils::getImageSubResourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    vkCmdClearColorImage(graphics_command_buffer, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
+                         &clear_value, 1, &range);
+  }
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -794,25 +749,10 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
     _resized_requested = true;
   }
 
+  _resource_manager->resetAllTransientImages(_frame_number % FRAMES_IN_FLIGHT);
+
   _frame_number++;
 }
-
-void Renderer::drawBackground(VkCommandBuffer cmd) {
-  VkClearColorValue clear_value = {};
-
-  clear_value = {{0.0f, 1.0f, 1.0f, 1.0f}};
-
-  VkImageSubresourceRange range =
-      vk_utils::getImageSubResourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
-
-  vkCmdClearColorImage(cmd, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
-                       &clear_value, 1, &range);
-
-
-                       
-}
-
-
 
 void Renderer::initImgui() {
 

@@ -2,6 +2,7 @@
 
 #include "platform/render/pipeline.h"
 #include "platform/render/render_object.h"
+#include "platform/render/vulkan_macros.h"
 #include "volk.h"
 #include <array>
 #include <cstddef>
@@ -44,7 +45,7 @@ struct FrameData {
   DeletionQueue<> _deletion_queue;
 };
 
-constexpr uint32_t FRAME_OVERLAP = 2;
+
 
 // Common Renderer Abstraction Interface, to do: replace vulkan objects with
 // general ones once you have a second graphics api
@@ -143,16 +144,13 @@ private:
 
   DescriptorAllocatorGrowable _global_descriptor_allocator;
 
-  Image _draw_image;
 
-  VkDescriptorSet _draw_image_descriptors;
-  VkDescriptorSetLayout _draw_image_descriptor_layout;
 
 
 
   VkDescriptorPool _imm_pool;
 
-  std::array<FrameData, FRAME_OVERLAP> _frames;
+  std::array<FrameData, FRAMES_IN_FLIGHT> _frames;
 
   ResourceManager *_resource_manager;
 
@@ -160,7 +158,7 @@ private:
 
   inline FrameData &getCurrentFrame() {
 
-    return _frames[_frame_number % FRAME_OVERLAP];
+    return _frames[_frame_number % FRAMES_IN_FLIGHT];
   };
 
   bool initVulkan();
@@ -172,7 +170,7 @@ private:
 
   void resizeSwapchain();
 
-  void initDrawImage();
+
 
   void initCommands();
 
@@ -184,5 +182,4 @@ private:
 
   void initImgui();
 
-  void drawBackground(VkCommandBuffer cmd);
 };
