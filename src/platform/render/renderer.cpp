@@ -71,7 +71,6 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   initSwapchain();
 
-
   initCommands();
 
   initSyncStructures();
@@ -79,6 +78,13 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   initDescriptors();
 
   initImgui();
+
+  PipelineBuilder2 builder{};
+  builder.makeGraphicsDefault();
+
+  _pipeline_manager->createGraphicsPipeline(
+      builder, std::array<std::string, 4>{"triangle", "vertexMain", "triangle",
+                                          "pixelMain"});
 
   _isInitialized = true;
 }
@@ -141,8 +147,6 @@ void Renderer::initDescriptors() {
   _resource_manager = new ResourceManager(_device, _chosen_gpu, _allocator);
 
   _main_deletion_queue.pushFunction([&] { delete _resource_manager; });
-
-  
 }
 
 bool Renderer::initVulkan() {
@@ -171,15 +175,20 @@ bool Renderer::initVulkan() {
         glfwCreateWindowSurface(_instance, _window_handle, nullptr, &_surface),
         "Could not create Surface\n");
 
-    VkPhysicalDeviceVulkan13Features features{
+    VkPhysicalDeviceVulkan13Features features13{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    features.dynamicRendering = true;
-    features.synchronization2 = true;
+    features13.dynamicRendering = VK_TRUE;
+    features13.synchronization2 = VK_TRUE;
+
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    features11.shaderDrawParameters = VK_TRUE;
 
     vkb::PhysicalDeviceSelector selector(vkb_inst);
     vkb::PhysicalDevice physical_device =
         selector.set_minimum_version(1, 3)
-            .set_required_features_13(features)
+            .set_required_features_13(features13)
+            .set_required_features_11(features11)
             .set_surface(_surface)
 
             .select()
@@ -516,6 +525,8 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
   // Commands start here
 
+  
+
 #pragma region Write Buffer/Image
 
   {
@@ -611,12 +622,15 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
 #pragma endregion
 
+#pragma region Start Drawing
+
   constexpr TransientImageKey draw_key = {
 
-      VK_FORMAT_B8G8R8A8_UNORM,
+      VK_FORMAT_R16G16B16A16_SFLOAT,
       {1920, 1080, 1},
       VK_IMAGE_TYPE_2D,
-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       VK_IMAGE_ASPECT_COLOR_BIT,
       VK_IMAGE_VIEW_TYPE_2D,
       1,
@@ -626,7 +640,8 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
   _resource_manager->registerTransientImage("Draw", draw_key);
 
-  Image _draw_image = _resource_manager->getTransientImage("Draw", _frame_number % FRAMES_IN_FLIGHT);
+  Image _draw_image = _resource_manager->getTransientImage(
+      "Draw", _frame_number % FRAMES_IN_FLIGHT);
 
   {
     VkCommandBufferBeginInfo begin_info = {};
@@ -640,30 +655,6 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
 
-  for (size_t i = 0; i < render_objects.size(); i++) {
-
-    const auto &m = render_objects[i];
-
-    // vkCmdBindPipeline(graphics_command_buffer,
-    // VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline_manager.)
-
-    VkDeviceSize vertex_offset = m.vertex_offset;
-
-    const Buffer &vertex_index_buffer =
-        _resource_manager->getBuffer(m.vertex_buffer_id);
-
-    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1,
-                           &vertex_index_buffer.buffer, &vertex_offset);
-
-    vkCmdBindIndexBuffer(graphics_command_buffer, vertex_index_buffer.buffer,
-                         m.index_offset, VK_INDEX_TYPE_UINT32);
-
-    vkCmdDrawIndexed(graphics_command_buffer, m.index_count, m.instance_count,
-                     0, 0, 0);
-  }
-
-  
-
   {
     VkClearColorValue clear_value = {};
 
@@ -672,9 +663,36 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
     VkImageSubresourceRange range =
         vk_utils::getImageSubResourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
-    vkCmdClearColorImage(graphics_command_buffer, _draw_image.image, VK_IMAGE_LAYOUT_GENERAL,
-                         &clear_value, 1, &range);
+    vkCmdClearColorImage(graphics_command_buffer, _draw_image.image,
+                         VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &range);
   }
+
+  auto color_info = vk_utils::attachmentInfo(_draw_image.view, nullptr,
+                                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  auto render_info = vk_utils::renderingInfo(
+      &color_info, 1, {_draw_image.extent.width, _draw_image.extent.height},
+      {0, 0}, VK_NULL_HANDLE, VK_NULL_HANDLE);
+  vkCmdBeginRendering(graphics_command_buffer, &render_info);
+
+  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    _pipeline_manager->getPipelineByIdx(0).pipeline);
+
+  VkViewport viewport = {0,
+                         0,
+                         (float)_draw_image.extent.width,
+                         (float)_draw_image.extent.height,
+                         0.0f,
+                         1.0f};
+
+  VkRect2D scissor = {0, 0, _draw_image.extent.width,
+                      _draw_image.extent.height};
+
+  vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
+  vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
+
+  vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
+
+  vkCmdEndRendering(graphics_command_buffer);
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -732,6 +750,8 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
                             getCurrentFrame()._render_fence),
              "Submit Graphics Commands");
   }
+
+#pragma endregion
 
   VkPresentInfoKHR present_info = {};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;

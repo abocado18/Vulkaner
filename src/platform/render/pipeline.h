@@ -101,6 +101,11 @@ public:
   PipelineManager(const std::string path, VkDevice &device);
   ~PipelineManager();
 
+  const Pipeline &getPipelineByIdx(size_t idx)
+  {
+    return _pipelines.at(idx);
+  }
+
   std::optional<VkShaderModule>
   createShaderModule(const std::string &name,
                      const std::string &entry_point_name,

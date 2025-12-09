@@ -402,12 +402,16 @@ void PipelineBuilder2::makeGraphicsDefault() {
       VK_DYNAMIC_STATE_VIEWPORT,
   };
 
+  builder.dynamic_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
   builder.dynamic_info.dynamicStateCount = dynamic_states.size();
   builder.dynamic_info.pDynamicStates = dynamic_states.data();
 
   vertex_attribute_desc = vertex::getVertexAttributeDescription();
   vertex_binding_desc = vertex::getVertexBindingDescription();
 
+  builder.vertex_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   builder.vertex_info.vertexAttributeDescriptionCount =
       vertex_attribute_desc.size();
   builder.vertex_info.pVertexAttributeDescriptions =
@@ -417,12 +421,18 @@ void PipelineBuilder2::makeGraphicsDefault() {
       vertex_binding_desc.size();
   builder.vertex_info.pVertexBindingDescriptions = vertex_binding_desc.data();
 
+  builder.assembly_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
   builder.assembly_info.primitiveRestartEnable = VK_FALSE;
   builder.assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+  builder.viewport_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
   builder.viewport_info.viewportCount = 1;
   builder.viewport_info.scissorCount = 1;
 
+  builder.rasterization_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   builder.rasterization_info.depthClampEnable = VK_FALSE;
   builder.rasterization_info.rasterizerDiscardEnable = VK_FALSE;
   builder.rasterization_info.polygonMode = VK_POLYGON_MODE_FILL;
@@ -432,6 +442,8 @@ void PipelineBuilder2::makeGraphicsDefault() {
   builder.rasterization_info.depthBiasSlopeFactor = 1.0f;
   builder.rasterization_info.lineWidth = 1.0f;
 
+  builder.multisample_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
   builder.multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   builder.multisample_info.sampleShadingEnable = VK_FALSE;
 
@@ -449,6 +461,8 @@ void PipelineBuilder2::makeGraphicsDefault() {
   builder.color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
   builder.color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
+  builder.color_blend_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
   builder.color_blend_info.logicOpEnable = VK_FALSE;
   builder.color_blend_info.logicOp = VK_LOGIC_OP_COPY;
   builder.color_blend_info.attachmentCount = 1;
@@ -619,9 +633,9 @@ size_t PipelineManager::createGraphicsPipeline(
 
   VkPipelineShaderStageCreateInfo stages[2] = {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-       VK_SHADER_STAGE_VERTEX_BIT, vertex_module, vertex_shader_entry.c_str()},
+       VK_SHADER_STAGE_VERTEX_BIT, vertex_module, "main"},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-       VK_SHADER_STAGE_FRAGMENT_BIT, frag_module, frag_shader_entry.c_str()},
+       VK_SHADER_STAGE_FRAGMENT_BIT, frag_module, "main"},
   };
 
   VkGraphicsPipelineCreateInfo graphics_pipeline_create_info{};
@@ -653,7 +667,7 @@ size_t PipelineManager::createGraphicsPipeline(
            "Create Graphics Pipeline");
 
   _pipelines.push_back(new_pipeline);
-  return _pipelines.size();
+  return _pipelines.size() - 1;
 }
 
 uint64_t PipelineManager::generateDescriptorSetLayoutHashKey(
