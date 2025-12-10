@@ -7,7 +7,7 @@ use std::vec;
 use anyhow::Ok;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
-use gltf::Gltf;
+use gltf::image::Source;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -62,6 +62,8 @@ fn main() -> anyhow::Result<()> {
     process_scene(&file);
 
     process_meshes(&file, &buffers);
+
+    process_images(&file, &images);
 
     return Ok(());
 }
@@ -172,6 +174,12 @@ fn process_node(node: &gltf::Node, entity_to_node: &mut HashMap<usize, u32>) -> 
             .insert("Mesh".to_string(), serde_json::json!(mesh.index()));
     }
 
+    if let Some(name) = node.name() {
+        entity
+            .components
+            .insert("Name".to_string(), serde_json::json!(name));
+    }
+
     if let Some(extra) = node.extras() {
         let extra_str = extra.get();
 
@@ -183,6 +191,139 @@ fn process_node(node: &gltf::Node, entity_to_node: &mut HashMap<usize, u32>) -> 
     }
 
     return entity;
+}
+
+fn process_images(scene: &gltf::Document, images: &Vec<gltf::image::Data>) {
+    for img in scene.images() {
+        let img_index = img.index();
+
+        let mut img_data: Vec<u8> = vec![];
+        let mut img_json: serde_json::Value;
+        let mut width: u32;
+        let mut height: u32;
+
+        match img.source() {
+            Source::View { view, mime_type } => {
+                let image: &gltf::image::Data = images.get(img_index).unwrap();
+
+                assert!(image.pixels.len() > 0);
+
+                img_data = match image.format {
+                    gltf::image::Format::R8 => image
+                        .pixels
+                        .iter()
+                        .flat_map(|r| [*r, *r, *r, 255])
+                        .collect(),
+
+                    gltf::image::Format::R8G8 => image
+                        .pixels
+                        .chunks(2)
+                        .flat_map(|rg| [rg[0], rg[0], rg[0], rg[1]])
+                        .collect(),
+
+                    gltf::image::Format::R8G8B8 => image
+                        .pixels
+                        .chunks(3)
+                        .flat_map(|c| [c[0], c[1], c[2], 255])
+                        .collect(),
+
+                    gltf::image::Format::R8G8B8A8 => image.pixels.clone(),
+
+                    gltf::image::Format::R16 => image
+                        .pixels
+                        .chunks(2)
+                        .flat_map(|r| {
+                            let v = u16::from_le_bytes([r[0], r[1]]) >> 8;
+                            [v as u8, v as u8, v as u8, 255]
+                        })
+                        .collect(),
+
+                    gltf::image::Format::R16G16 => image
+                        .pixels
+                        .chunks(4)
+                        .flat_map(|c| {
+                            let r = u16::from_le_bytes([c[0], c[1]]) >> 8;
+                            let g = u16::from_le_bytes([c[2], c[3]]) >> 8;
+                            [r as u8, r as u8, r as u8, g as u8]
+                        })
+                        .collect(),
+
+                    gltf::image::Format::R16G16B16 => image
+                        .pixels
+                        .chunks(6)
+                        .flat_map(|c| {
+                            let r = u16::from_le_bytes([c[0], c[1]]) >> 8;
+                            let g = u16::from_le_bytes([c[2], c[3]]) >> 8;
+                            let b = u16::from_le_bytes([c[4], c[5]]) >> 8;
+                            [r as u8, g as u8, b as u8, 255]
+                        })
+                        .collect(),
+
+                    gltf::image::Format::R16G16B16A16 => image
+                        .pixels
+                        .chunks(8)
+                        .flat_map(|c| {
+                            let r = u16::from_le_bytes([c[0], c[1]]) >> 8;
+                            let g = u16::from_le_bytes([c[2], c[3]]) >> 8;
+                            let b = u16::from_le_bytes([c[4], c[5]]) >> 8;
+                            let a = u16::from_le_bytes([c[6], c[7]]) >> 8;
+                            [r as u8, g as u8, b as u8, a as u8]
+                        })
+                        .collect(),
+
+                    gltf::image::Format::R32G32B32FLOAT => {
+                        let f: &[f32] = bytemuck::cast_slice(&image.pixels);
+                        f.chunks(3)
+                            .flat_map(|c| {
+                                [
+                                    (c[0] * 255.0) as u8,
+                                    (c[1] * 255.0) as u8,
+                                    (c[2] * 255.0) as u8,
+                                    255,
+                                ]
+                            })
+                            .collect()
+                    }
+
+                    gltf::image::Format::R32G32B32A32FLOAT => {
+                        let f: &[f32] = bytemuck::cast_slice(&image.pixels);
+                        f.chunks(4)
+                            .flat_map(|c| {
+                                [
+                                    (c[0] * 255.0) as u8,
+                                    (c[1] * 255.0) as u8,
+                                    (c[2] * 255.0) as u8,
+                                    (c[3] * 255.0) as u8,
+                                ]
+                            })
+                            .collect()
+                    }
+                };
+
+                width = image.width;
+                height = image.height;
+            }
+
+            Source::Uri { uri, mime_type } => {
+                let dyn_img = image::open(uri).unwrap();
+
+                let rgba_img = dyn_img.to_rgba8();
+
+                width = rgba_img.width();
+                height = rgba_img.height();
+                img_data = rgba_img.into_raw();
+            }
+        }
+
+        let value = serde_json::json!({"width" : width, "height" : height});
+
+        let _ = std::fs::create_dir_all("scene/images");
+        let file_path = "scene/images/".to_string() + &img_index.to_string() + &".json".to_string();
+        let bin_path = "scene/images/".to_string() + &img_index.to_string() + &".bin".to_string();
+        let _ = std::fs::write(file_path, serde_json::to_string_pretty(&value).unwrap());
+
+        let _ = std::fs::write(bin_path, bytemuck::cast_slice(&img_data));
+    }
 }
 
 fn process_scene(scene: &gltf::Document) {
