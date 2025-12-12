@@ -180,6 +180,67 @@ fn process_node(node: &gltf::Node, entity_to_node: &mut HashMap<usize, u32>) -> 
             .insert("Name".to_string(), serde_json::json!(name));
     }
 
+    if let Some(cam) = node.camera() {
+        let cam_json: serde_json::Value = match cam.projection() {
+            gltf::camera::Projection::Orthographic(orthographic) => {
+                serde_json::json!({
+                        "type" : "Orthographic",
+                        "xmag" : orthographic.xmag(),
+                        "ymag" : orthographic.ymag(),
+                        "zfar" : orthographic.zfar(),
+                        "znear" : orthographic.znear(),
+                })
+            }
+            gltf::camera::Projection::Perspective(perspective) => {
+                serde_json::json!({
+                    "type" : "Perspective",
+                    "yfov" : perspective.yfov(),
+                    "zfar" : perspective.zfar(),
+                    "znear" : perspective.znear(),
+                    "aspect_ratio" : perspective.aspect_ratio(),
+                })
+            }
+        };
+
+        entity.components.insert("Camera".to_string(), cam_json);
+    }
+
+    if let Some(light) = node.light() {
+
+
+        let light_json = match light.kind() {
+            gltf::khr_lights_punctual::Kind::Directional => {
+                serde_json::json!({
+                    "type" : "Directional",
+                    "color" : light.color(),
+                    "intensity" : light.intensity(),
+                })
+            },
+            gltf::khr_lights_punctual::Kind::Point => {
+                serde_json::json!({
+                    "type" : "Point",
+                    "color" : light.color(),
+                    "intensity" : light.intensity(),
+                    "range" : light.range(),
+            })
+            },
+            gltf::khr_lights_punctual::Kind::Spot { inner_cone_angle, outer_cone_angle } => {
+                serde_json::json!({
+                    "type" : "Spot",
+                    "color" : light.color(),
+                    "intensity" : light.intensity(),
+                    "range" : light.range(),
+                    "inner_angle" : inner_cone_angle,
+                    "outer_angle" : outer_cone_angle,
+            })
+            },
+        };
+
+        entity.components.insert("Light".to_string(), light_json);
+
+
+    }
+
     if let Some(extra) = node.extras() {
         let extra_str = extra.get();
 

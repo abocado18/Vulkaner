@@ -302,6 +302,11 @@ public:
                   std::array<uint32_t, 3> offset = {0, 0, 0},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
 
+  void transistionImage(VkCommandBuffer cmd, Image &image,
+                        VkImageLayout new_layout,
+                        uint32_t old_family_queue = UINT32_MAX,
+                        uint32_t new_family_queue = UINT32_MAX);
+
   const Image &getImage(size_t idx);
   const Buffer &getBuffer(size_t idx);
 

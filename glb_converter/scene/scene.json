@@ -6,6 +6,7 @@
     ],
     "parent": -1,
     "components": {
+      "Name": "Suzanne",
       "Transform": {
         "rotation": [
           0.0,
@@ -24,8 +25,7 @@
           -4.378892421722412
         ]
       },
-      "Mesh": 1,
-      "Name": "Suzanne"
+      "Mesh": 1
     }
   },
   {
@@ -33,7 +33,6 @@
     "children": [],
     "parent": 0,
     "components": {
-      "Mesh": 0,
       "Name": "Cube",
       "Transform": {
         "rotation": [
@@ -52,7 +51,8 @@
           -2.1835734844207764,
           4.378892421722412
         ]
-      }
+      },
+      "Mesh": 0
     }
   },
   {
@@ -60,7 +60,6 @@
     "children": [],
     "parent": -1,
     "components": {
-      "Name": "Camera",
       "Transform": {
         "rotation": [
           -0.22507643699645996,
@@ -78,6 +77,14 @@
           16.99797821044922,
           31.87401580810547
         ]
+      },
+      "Name": "Camera",
+      "Camera": {
+        "aspect_ratio": 1.7777777910232544,
+        "type": "Perspective",
+        "yfov": 0.39959651231765747,
+        "zfar": 1000.0,
+        "znear": 0.10000000149011612
       }
     }
   },
@@ -86,6 +93,8 @@
     "children": [],
     "parent": -1,
     "components": {
+      "Mesh": 0,
+      "Name": "Cube.001",
       "Transform": {
         "rotation": [
           0.0,
@@ -103,9 +112,7 @@
           1.7960491180419922,
           3.0641472339630127
         ]
-      },
-      "Mesh": 0,
-      "Name": "Cube.001"
+      }
     }
   },
   {
@@ -131,7 +138,16 @@
           0.0
         ]
       },
-      "Name": "Sun"
+      "Name": "Sun",
+      "Light": {
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 683.0,
+        "type": "Directional"
+      }
     }
   }
 ]

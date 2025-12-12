@@ -39,7 +39,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
   return VK_FALSE;
 }
 
-Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
+VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
+    : _frame_number(0) {
 
   _isInitialized = false;
   _resized_requested = false;
@@ -51,13 +52,13 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
 
   _window_handle = glfwCreateWindow(width, height, "Vulkan", nullptr, nullptr);
 
-  glfwSetFramebufferSizeCallback(
-      _window_handle, [](GLFWwindow *window, int width, int height) {
-        Renderer *r =
-            reinterpret_cast<Renderer *>(glfwGetWindowUserPointer(window));
+  glfwSetFramebufferSizeCallback(_window_handle, [](GLFWwindow *window,
+                                                    int width, int height) {
+    VulkanRenderer *r =
+        reinterpret_cast<VulkanRenderer *>(glfwGetWindowUserPointer(window));
 
-        r->resizeSwapchain();
-      });
+    r->resizeSwapchain();
+  });
 
   glfwSetWindowUserPointer(_window_handle, this);
 
@@ -89,7 +90,7 @@ Renderer::Renderer(uint32_t width, uint32_t height) : _frame_number(0) {
   _isInitialized = true;
 }
 
-Renderer::~Renderer() {
+VulkanRenderer::~VulkanRenderer() {
 
   if (_isInitialized) {
 
@@ -142,14 +143,14 @@ Renderer::~Renderer() {
   }
 }
 
-void Renderer::initDescriptors() {
+void VulkanRenderer::initDescriptors() {
 
   _resource_manager = new ResourceManager(_device, _chosen_gpu, _allocator);
 
   _main_deletion_queue.pushFunction([&] { delete _resource_manager; });
 }
 
-bool Renderer::initVulkan() {
+bool VulkanRenderer::initVulkan() {
 
   volkInitialize();
 
@@ -273,15 +274,15 @@ bool Renderer::initVulkan() {
   return true;
 }
 
-void Renderer::initSwapchain() {
+void VulkanRenderer::initSwapchain() {
   int width, height;
   glfwGetFramebufferSize(_window_handle, &width, &height);
 
   createSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 }
 
-void Renderer::createSwapchain(uint32_t width, uint32_t height,
-                               VkSwapchainKHR old_swapchain) {
+void VulkanRenderer::createSwapchain(uint32_t width, uint32_t height,
+                                     VkSwapchainKHR old_swapchain) {
 
   vkb::SwapchainBuilder builder(_chosen_gpu, _device, _surface);
 
@@ -316,7 +317,7 @@ void Renderer::createSwapchain(uint32_t width, uint32_t height,
   _swapchain_images_views = swapchain.get_image_views().value();
 }
 
-void Renderer::destroySwapchain() {
+void VulkanRenderer::destroySwapchain() {
 
   for (VkImageView &v : _swapchain_images_views) {
     vkDestroyImageView(_device, v, nullptr);
@@ -325,7 +326,7 @@ void Renderer::destroySwapchain() {
   vkDestroySwapchainKHR(_device, _swapchain, nullptr);
 }
 
-void Renderer::initCommands() {
+void VulkanRenderer::initCommands() {
 
   VkCommandPoolCreateInfo graphics_pool_create_info = {};
   graphics_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -430,7 +431,7 @@ void Renderer::initCommands() {
   }
 }
 
-void Renderer::initSyncStructures() {
+void VulkanRenderer::initSyncStructures() {
 
   VkFenceCreateInfo fence_create_info = {};
   fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -468,7 +469,7 @@ void Renderer::initSyncStructures() {
   }
 }
 
-void Renderer::draw(std::vector<RenderObject> &render_objects) {
+void VulkanRenderer::draw(std::vector<RenderObject> &render_objects) {
 
   glfwPollEvents();
 
@@ -524,8 +525,6 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
   }
 
   // Commands start here
-
-  
 
 #pragma region Write Buffer/Image
 
@@ -655,6 +654,9 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
 
+  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
+                                      VK_IMAGE_LAYOUT_GENERAL);
+
   {
     VkClearColorValue clear_value = {};
 
@@ -667,8 +669,11 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
                          VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &range);
   }
 
-  auto color_info = vk_utils::attachmentInfo(_draw_image.view, nullptr,
-                                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
+                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  auto color_info = vk_utils::attachmentInfo(
+      _draw_image.view, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   auto render_info = vk_utils::renderingInfo(
       &color_info, 1, {_draw_image.extent.width, _draw_image.extent.height},
       {0, 0}, VK_NULL_HANDLE, VK_NULL_HANDLE);
@@ -694,9 +699,8 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
 
   vkCmdEndRendering(graphics_command_buffer);
 
-  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_GENERAL,
-                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                             _draw_image.image);
+  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
+                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -774,7 +778,7 @@ void Renderer::draw(std::vector<RenderObject> &render_objects) {
   _frame_number++;
 }
 
-void Renderer::initImgui() {
+void VulkanRenderer::initImgui() {
 
   VkDescriptorPoolSize pool_sizes[] = {
       {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
@@ -843,7 +847,7 @@ void Renderer::initImgui() {
   });
 }
 
-void Renderer::resizeSwapchain() {
+void VulkanRenderer::resizeSwapchain() {
   vkDeviceWaitIdle(_device);
 
   int width, height;
@@ -862,34 +866,35 @@ void Renderer::resizeSwapchain() {
   _resized_requested = false;
 }
 
-ResourceHandle Renderer::createBuffer(size_t size,
-                                      VkBufferUsageFlags usage_flags) {
+ResourceHandle VulkanRenderer::createBuffer(size_t size,
+                                            VkBufferUsageFlags usage_flags) {
 
   return _resource_manager->createBuffer(size, usage_flags);
 }
 
-BufferHandle Renderer::writeBuffer(ResourceHandle handle, void *data,
-                                   uint32_t size, uint32_t offset,
-                                   VkAccessFlags new_buffer_access_flags) {
+BufferHandle
+VulkanRenderer::writeBuffer(ResourceHandle handle, void *data, uint32_t size,
+                            uint32_t offset,
+                            VkAccessFlags new_buffer_access_flags) {
 
   return _resource_manager->writeBuffer(handle, data, size, offset,
                                         new_buffer_access_flags);
 }
 
-ResourceHandle
-Renderer::createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
-                      VkFormat image_format, VkImageUsageFlags image_usage,
-                      VkImageViewType view_type, VkImageAspectFlags aspect_mask,
-                      bool create_mipmaps, uint32_t array_layers) {
+ResourceHandle VulkanRenderer::createImage(
+    std::array<uint32_t, 3> extent, VkImageType image_type,
+    VkFormat image_format, VkImageUsageFlags image_usage,
+    VkImageViewType view_type, VkImageAspectFlags aspect_mask,
+    bool create_mipmaps, uint32_t array_layers) {
 
   return _resource_manager->createImage(extent, image_type, image_format,
                                         image_usage, view_type, aspect_mask,
                                         create_mipmaps, array_layers);
 }
 
-void Renderer::writeImage(ResourceHandle handle, void *data, uint32_t size,
-                          std::array<uint32_t, 3> offset,
-                          VkImageLayout new_layout) {
+void VulkanRenderer::writeImage(ResourceHandle handle, void *data,
+                                uint32_t size, std::array<uint32_t, 3> offset,
+                                VkImageLayout new_layout) {
 
   _resource_manager->writeImage(handle, data, size, offset, new_layout);
 }

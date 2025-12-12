@@ -856,3 +856,13 @@ void ResourceManager::resetAllTransientImages(const uint32_t frame) {
 
   cache.used_transient_images.clear();
 }
+
+void ResourceManager::transistionImage(
+    VkCommandBuffer cmd, Image &image, VkImageLayout new_layout,
+    uint32_t old_family_queue, uint32_t new_family_queue) {
+
+  vk_utils::transistionImage(cmd, image.current_layout, new_layout, image.image,
+                             old_family_queue, new_family_queue);
+
+  image.current_layout = new_layout;
+}

@@ -75,10 +75,10 @@ public:
   virtual bool shouldRun() = 0;
 };
 
-class Renderer : public IRenderer {
+class VulkanRenderer : public IRenderer {
 public:
-  Renderer(uint32_t width, uint32_t height);
-  ~Renderer();
+  VulkanRenderer(uint32_t width, uint32_t height);
+  ~VulkanRenderer();
 
   inline bool shouldRun() override {
     return !glfwWindowShouldClose(_window_handle);

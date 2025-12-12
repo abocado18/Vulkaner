@@ -1,18 +1,10 @@
 #pragma once
 
-
-
-
 namespace game {
-    class Game;
+class Game;
 }
 
-
-
-
-
-
-  struct IPlugin {
+struct IPlugin {
 
   virtual void build(game::Game &game) = 0;
 };

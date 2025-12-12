@@ -15,7 +15,8 @@ enum class BufferType
 };
 
 
-struct RenderBuffers {
+///Handle to Render Buffers to upload data
+struct RenderBuffersResource {
 
   std::unordered_map<BufferType, ResourceHandle> data = {};
 };
