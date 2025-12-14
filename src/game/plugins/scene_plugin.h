@@ -1,7 +1,5 @@
 #pragma once
 #include "game/plugin.h"
-#include "game/required_components/materials.h"
-#include "nlohmann/json_fwd.hpp"
 
 #include <array>
 #include <optional>
@@ -33,7 +31,4 @@ class ScenePlugin : public IPlugin {
 
 
 
-//Registry for all serializable Components
-#define COMP_LIST(T) \
-X(Transform) \
-X(GlobalTransform) \
+

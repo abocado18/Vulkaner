@@ -1,23 +1,23 @@
 #include "scene_plugin.h"
-
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/plugins/default_components_plugin.h"
+#include "game/plugins/registry_plugin.h"
 #include "game/plugins/render_plugin.h"
-#include "game/required_components/materials.h"
-#include "game/required_components/name.h"
-#include "game/required_components/transform.h"
-#include "platform/math/math.h"
+
 #include "platform/render/renderer.h"
 
-#include <cstddef>
+#include <X11/Xmd.h>
+
 #include <cstdint>
 #include <fstream>
-#include <ios>
+
 #include <iostream>
-#include <memory>
+
 #include <string>
+
 #include <unordered_map>
-#include <unordered_set>
+
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -25,7 +25,12 @@ using namespace vecs;
 
 void ScenePlugin::build(game::Game &game) {
 
+
+
   std::cout << "Initialize Scene Plugin\n";
+
+
+ 
 
   game.world.addSystem<ResMut<Commands>>(
       game.Startup, [](auto view, Commands &cmd) {
@@ -38,13 +43,14 @@ void ScenePlugin::build(game::Game &game) {
       });
 
   game.world.addSystem<ResMut<Commands>, ResMut<IRenderer *>,
-
                        Res<RenderBuffersResource>, Added<Read<LoadSceneName>>>(
       game.Update, [](auto view, Commands &cmd, IRenderer *renderer,
+
                       const RenderBuffersResource &render_buffers) {
         //
 
         view.forEach([](auto view, Entity e, Commands &cmd, IRenderer *renderer,
+
                         const RenderBuffersResource &render_buffers,
                         const LoadSceneName &scene_name) {
           const std::string scene_path = scene_name.scene_path;
@@ -59,7 +65,8 @@ void ScenePlugin::build(game::Game &game) {
             std::ifstream file(scene_path + "/scene.json");
 
             if (!file.is_open()) {
-              std::cout << "Could not open Scene " << scene_path << "\n";
+              std::cout << "Could not open Scene " << scene_path + "/scene.json"
+                        << "\n";
               return;
             }
 
@@ -70,20 +77,51 @@ void ScenePlugin::build(game::Game &game) {
               return;
             }
           }
+          // Starts here
 
-          std::shared_ptr<std::unordered_map<int32_t, int32_t>>
-              scene_index_to_entity_index =
-                  std::make_shared<std::unordered_map<int32_t, int32_t>>();
+          cmd.push([scene_json](Ecs *world) {
+            std::unordered_map<int32_t, Entity> file_index_to_node_index{};
+            {
+              for (auto &entity : scene_json) {
 
-          for (auto &e : scene_json) {
+                int32_t scene_id = entity["id"].get<int32_t>();
 
-            int32_t e_scene_id = e["id"].get<int32_t>();
-            int32_t parent_e_scene_id = e["parent"].get<int32_t>();
-
-
-            for (auto &c : e["components"]) {
+                file_index_to_node_index[scene_id] = world->createEntity();
+              };
             }
-          }
+
+            for (auto &entity : scene_json) {
+              int32_t entity_scene_id = entity["id"].get<int32_t>();
+              int32_t parent_scene_id = entity["parent"].get<int32_t>();
+
+              Entity entity_id = file_index_to_node_index.at(entity_scene_id);
+
+              if (parent_scene_id >= 0) {
+
+                Entity parent_id = file_index_to_node_index.at(parent_scene_id);
+
+                world->addComponent<Parent>(entity_id, Parent{parent_id});
+              }
+
+              const auto &components = entity["components"];
+
+              ComponentRegistry *registry =
+                  world->getResource<ComponentRegistry>();
+
+              if (registry == nullptr) {
+                std::cerr << "Compoennt Registry must be addded\n";
+                std::abort();
+              }
+
+              for (auto it = components.begin(); it != components.end(); it++) {
+
+                const std::string &name = it.key();
+                const json &json_data = it.value();
+
+                registry->getRegistryFunc(name)(world, json_data, entity_id);
+              }
+            }
+          });
         });
       });
 }

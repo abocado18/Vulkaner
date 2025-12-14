@@ -42,18 +42,20 @@ void game::Game::tick() {
 
   world.insertResource<Time>(time_data);
 
-  world.runSchedule(PreUpdate);
-  world.executeCommands();
+  auto runAndExecute = [](vecs::Ecs &world, vecs::Schedule schedule) {
+    world.runSchedule(schedule);
+    world.executeCommands();
+  };
 
-  world.runSchedule(Update);
-  world.executeCommands();
+  runAndExecute(world, PreUpdate);
+  runAndExecute(world, Update);
+  runAndExecute(world, PostUpdate);
 
-  world.runSchedule(PostUpdate);
-  world.executeCommands();
+  runAndExecute(world, PreRender);
+  runAndExecute(world, Render);
+  runAndExecute(world, PostRender);
 
   world.update();
-
- 
 }
 
 const bool game::Game::shouldRun() {

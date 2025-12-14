@@ -47,6 +47,10 @@ public:
   vecs::Schedule Update = {};
   vecs::Schedule PostUpdate = {};
 
+  vecs::Schedule PreRender {};
+  vecs::Schedule Render {};
+  vecs::Schedule PostRender {};
+
   vecs::Schedule OnClose = {};
 
 private:
