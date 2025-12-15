@@ -10,14 +10,23 @@
 
 using json = nlohmann::json;
 
+// Store functions to create Components
 struct ComponentRegistry {
 
 public:
-  using RegistryFunc = void (*)(vecs::Ecs *world, const json &j, vecs::Entity e);
+  using RegistryFunc = void (*)(vecs::Ecs *world, const json &j, vecs::Entity e,
+                                void *custom_data);
+
+  template <typename T>
+  void registerComponent(const std::string &name,
+                         RegistryFunc custom) {
+
+    registry[name] = custom;
+  }
 
   template <typename T> void registerComponent(const std::string &name) {
-
-    registry[name] = [](vecs::Ecs *world, const json &j, vecs::Entity e) {
+    registry[name] = [](vecs::Ecs *world, const json &j, vecs::Entity e,
+                        void *custom_data) {
       T comp = j.get<T>();
 
       world->addComponent<T>(e, comp);

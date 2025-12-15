@@ -2,23 +2,30 @@
 
 #include "game/game.h"
 #include "game/plugin.h"
+#include "game/plugins/asset_plugin.h"
+#include "game/plugins/scene_plugin.h"
 #include "nlohmann/json.hpp"
 #include "platform/render/resources.h"
 #include <unordered_map>
 
-struct Mesh {
-
-  size_t id;
+// Keep track on loaded meshes
+struct MeshCpuData {
+  bool loaded = false;
 };
 
-inline void to_json(nlohmann::json &j, const Mesh &m) { j = m.id; }
+struct LoadedMeshesResource {
+  std::unordered_map<std::string, MeshCpuData> data_map {};
+};
 
-inline void from_json(const nlohmann::json &j, Mesh &m) {
-  m.id = j.get<size_t>();
-}
+struct Mesh {
+  size_t id;
+  AssetHandle<LoadSceneName> scene_handle;
+};
 
 struct GpuMesh {
   BufferHandle vertex_index_buffer_handle{};
+  size_t index_number;
+  size_t index_byte_offset;
 };
 
 struct GpuTransform {

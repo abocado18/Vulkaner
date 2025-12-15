@@ -1,13 +1,18 @@
 #include "render_plugin.h"
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/plugins/asset_plugin.h"
 #include "game/plugins/default_components_plugin.h"
 #include "game/plugins/registry_plugin.h"
+#include "game/plugins/scene_plugin.h"
 #include "platform/math/math.h"
 #include "platform/render/render_object.h"
 #include "platform/render/renderer.h"
 #include "platform/render/resources.h"
 #include <cstdint>
+#include <fstream>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -21,9 +26,24 @@ void RenderPlugin::build(game::Game &game) {
 
   game.world.insertResource<IRenderer *>(r);
 
+  game.world.insertResource<LoadedMeshesResource>({});
+
   auto *reg = game.world.getResource<ComponentRegistry>();
 
-  reg->registerComponent<Mesh>("Mesh");
+  reg->registerComponent<Mesh>("Mesh", [](vecs::Ecs *world, const json &j,
+                                          vecs::Entity e, void *custom_data) {
+    AssetHandle<LoadSceneName> *scene_name_handle =
+        static_cast<AssetHandle<LoadSceneName> *>(custom_data);
+
+    Mesh m{};
+    m.id = j.get<size_t>();
+
+    auto *res = world->getResource<Assets<MeshCpuData>>();
+
+    m.scene_handle = *scene_name_handle;
+
+    world->addComponent<Mesh>(e, m);
+  });
 
   RenderBuffersResource render_buffers = {};
 
@@ -97,16 +117,107 @@ void RenderPlugin::build(game::Game &game) {
         });
       });
 
-  game.world.addSystem<Added<Read<Mesh>>, Res<RenderBuffersResource>,
-                       ResMut<IRenderer *>, ResMut<Commands>>(
-      game.PreRender, [](auto view, const RenderBuffersResource &buffers_res,
-                         IRenderer *renderer, Commands &cmd) {
-        view.forEach([](auto view, Entity e, const Mesh &m,
-                        const RenderBuffersResource &buffers_res,
-                        IRenderer *renderer, Commands &cmd) {
-          auto transform_buffer = buffers_res.data.at(BufferType::Vertex);
-        });
-      });
+  game.world
+      .addSystem<Added<Write<Mesh>>, Res<RenderBuffersResource>,
+                 ResMut<IRenderer *>, ResMut<Commands>,
+                 Res<Assets<LoadSceneName>>, ResMut<LoadedMeshesResource>>(
+          game.PreRender,
+          [](auto view, const RenderBuffersResource &buffers_res,
+             IRenderer *renderer, Commands &cmd,
+             const Assets<LoadSceneName> &scene_names,
+             LoadedMeshesResource &load_meshes_res) {
+            //
+            view.forEach([](auto view, Entity e, Mesh &m,
+                            const RenderBuffersResource &buffers_res,
+                            IRenderer *renderer, Commands &cmd,
+                            const Assets<LoadSceneName> &scene_names,
+                            LoadedMeshesResource &load_meshes_res) {
+              auto transform_buffer = buffers_res.data.at(BufferType::Vertex);
+
+              const auto *load_scene_name =
+                  scene_names.getConstAsset(m.scene_handle);
+
+              const std::string &scene_path = load_scene_name->scene_path;
+
+              const std::string mesh_data_path =
+                  scene_path + "meshes/" + std::to_string(m.id) + ".json";
+              const std::string mesh_bin_path =
+                  scene_path + "meshes/" + std::to_string(m.id) + ".bin";
+
+              auto it = load_meshes_res.data_map.find(mesh_data_path);
+
+              if(it != load_meshes_res.data_map.end()) {
+
+                if(it->second.loaded == true) {
+
+                  //Mesh already loaded
+
+                }
+                  
+
+
+                
+              }
+
+              
+
+              std::cout << "Mesh Path: " << mesh_data_path << "\n";
+
+              json mesh_json;
+              {
+                std::ifstream file(mesh_data_path);
+
+                if (!file.is_open()) {
+                  return;
+                }
+
+                mesh_json = json::parse(file);
+
+                file.close();
+
+                if (mesh_json.is_discarded()) {
+                  return;
+                }
+              }
+
+              size_t index_byte_offset =
+                  mesh_json["Index Byte Offset"].get<size_t>();
+              size_t index_number = mesh_json["Index Number"].get<size_t>();
+              size_t vertex_number = mesh_json["Vertex Number"].get<size_t>();
+
+              auto loadBinaryData =
+                  [](const std::string &path) -> std::vector<unsigned char> {
+                std::ifstream file(path, std::ios::binary);
+
+                if (!file.is_open())
+                  return {};
+
+                std::vector<unsigned char> data(
+                    std::istreambuf_iterator<char>(file), {});
+
+                return data;
+              };
+
+              std::vector<unsigned char> mesh_bin_data =
+                  loadBinaryData(mesh_bin_path);
+
+              GpuMesh gpu_mesh{};
+
+              gpu_mesh.vertex_index_buffer_handle = renderer->writeBuffer(
+                  transform_buffer, mesh_bin_data.data(),
+                  mesh_bin_data.size() * sizeof(unsigned char), UINT32_MAX,
+                  VK_ACCESS_SHADER_READ_BIT);
+
+              gpu_mesh.index_number = index_number;
+              gpu_mesh.index_byte_offset = index_byte_offset;
+
+              mesh_data->loaded = true;
+
+              cmd.push([gpu_mesh, e](Ecs *world) {
+                world->addComponent<GpuMesh>(e, gpu_mesh);
+              });
+            });
+          });
 
 #pragma endregion
 }

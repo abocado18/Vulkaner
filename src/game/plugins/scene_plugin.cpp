@@ -1,6 +1,7 @@
 #include "scene_plugin.h"
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
+#include "game/plugins/asset_plugin.h"
 #include "game/plugins/default_components_plugin.h"
 #include "game/plugins/registry_plugin.h"
 #include "game/plugins/render_plugin.h"
@@ -25,12 +26,11 @@ using namespace vecs;
 
 void ScenePlugin::build(game::Game &game) {
 
-
-
   std::cout << "Initialize Scene Plugin\n";
 
+  Assets<LoadSceneName> scene_name_assets{};
 
- 
+  game.world.insertResource<Assets<LoadSceneName>>(scene_name_assets);
 
   game.world.addSystem<ResMut<Commands>>(
       game.Startup, [](auto view, Commands &cmd) {
@@ -43,19 +43,23 @@ void ScenePlugin::build(game::Game &game) {
       });
 
   game.world.addSystem<ResMut<Commands>, ResMut<IRenderer *>,
+                       ResMut<Assets<LoadSceneName>>,
                        Res<RenderBuffersResource>, Added<Read<LoadSceneName>>>(
       game.Update, [](auto view, Commands &cmd, IRenderer *renderer,
-
+                      Assets<LoadSceneName> &asset_scene_names,
                       const RenderBuffersResource &render_buffers) {
         //
 
         view.forEach([](auto view, Entity e, Commands &cmd, IRenderer *renderer,
-
+                        Assets<LoadSceneName> &asset_scene_names,
                         const RenderBuffersResource &render_buffers,
                         const LoadSceneName &scene_name) {
           const std::string scene_path = scene_name.scene_path;
 
           std::cout << "Load Scene: " << scene_path << "\n";
+
+          // Cache Scene Name as asset
+          AssetHandle<LoadSceneName> file_handle = asset_scene_names.registerAsset(LoadSceneName{scene_name});
 
           cmd.push(
               [e](Ecs *world) { world->removeComponent<LoadSceneName>(e); });
@@ -79,7 +83,7 @@ void ScenePlugin::build(game::Game &game) {
           }
           // Starts here
 
-          cmd.push([scene_json](Ecs *world) {
+          cmd.push([scene_json, file_handle](Ecs *world) mutable {
             std::unordered_map<int32_t, Entity> file_index_to_node_index{};
             {
               for (auto &entity : scene_json) {
@@ -118,7 +122,10 @@ void ScenePlugin::build(game::Game &game) {
                 const std::string &name = it.key();
                 const json &json_data = it.value();
 
-                registry->getRegistryFunc(name)(world, json_data, entity_id);
+
+                
+
+                registry->getRegistryFunc(name)(world, json_data, entity_id, &file_handle);
               }
             }
           });
