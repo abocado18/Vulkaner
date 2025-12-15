@@ -61,8 +61,24 @@ public:
     return ref.lock().get();
   }
 
+  size_t pathToAssetId(const std::string &path) {
+
+    auto it = path_to_id.find(path);
+
+    if (it != path_to_id.end()) {
+
+      return it->second;
+    }
+
+    size_t id = next_id++;
+    path_to_id[path] = id;
+    return id;
+  };
+
 private:
   std::unordered_map<size_t, std::weak_ptr<T>> data_map{};
+
+  std::unordered_map<std::string, size_t> path_to_id{};
 
   static inline size_t next_id = 0;
 };

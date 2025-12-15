@@ -28,6 +28,8 @@ void RenderPlugin::build(game::Game &game) {
 
   game.world.insertResource<LoadedMeshesResource>({});
 
+  game.world.insertResource<Assets<MeshGpuData>>({});
+
   auto *reg = game.world.getResource<ComponentRegistry>();
 
   reg->registerComponent<Mesh>("Mesh", [](vecs::Ecs *world, const json &j,
@@ -146,20 +148,13 @@ void RenderPlugin::build(game::Game &game) {
 
               auto it = load_meshes_res.data_map.find(mesh_data_path);
 
-              if(it != load_meshes_res.data_map.end()) {
+              if (it != load_meshes_res.data_map.end()) {
 
-                if(it->second.loaded == true) {
+                if (it->second.loaded == true) {
 
-                  //Mesh already loaded
-
+                  // Mesh already loaded
                 }
-                  
-
-
-                
               }
-
-              
 
               std::cout << "Mesh Path: " << mesh_data_path << "\n";
 
@@ -211,7 +206,7 @@ void RenderPlugin::build(game::Game &game) {
               gpu_mesh.index_number = index_number;
               gpu_mesh.index_byte_offset = index_byte_offset;
 
-              mesh_data->loaded = true;
+              // mesh_data->loaded = true;
 
               cmd.push([gpu_mesh, e](Ecs *world) {
                 world->addComponent<GpuMesh>(e, gpu_mesh);

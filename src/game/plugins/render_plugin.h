@@ -13,8 +13,14 @@ struct MeshCpuData {
   bool loaded = false;
 };
 
+struct MeshGpuData {
+  BufferHandle vertex_index_buffer_handle{};
+  size_t index_number;
+  size_t index_byte_offset;
+};
+
 struct LoadedMeshesResource {
-  std::unordered_map<std::string, MeshCpuData> data_map {};
+  std::unordered_map<std::string, MeshCpuData> data_map{};
 };
 
 struct Mesh {
@@ -23,9 +29,7 @@ struct Mesh {
 };
 
 struct GpuMesh {
-  BufferHandle vertex_index_buffer_handle{};
-  size_t index_number;
-  size_t index_byte_offset;
+  AssetHandle<MeshGpuData> mesh_gpu_data{};
 };
 
 struct GpuTransform {
