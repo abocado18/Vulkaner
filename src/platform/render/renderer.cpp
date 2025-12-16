@@ -693,7 +693,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   // Camera
 
   std::vector<CombinedResourceIndexAndDescriptorType> cam_resources(1);
-  cam_resources[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+  cam_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
   cam_resources[0].idx = camera.camera_data.id;
   Descriptor cam_desc = _resource_manager->bindResources(cam_resources);
 

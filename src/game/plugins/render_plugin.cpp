@@ -56,6 +56,7 @@ void RenderPlugin::build(game::Game &game) {
 
   ResourceHandle transform_handle =
       r->createBuffer(1'000'000, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
   ResourceHandle material_handle =

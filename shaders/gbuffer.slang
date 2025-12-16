@@ -19,7 +19,7 @@ struct CamData {
 
 
 [vk_binding(0, 0)]
-StructuredBuffer<CamData> cam_data;
+ConstantBuffer<CamData> cam_data;
 
 
 
@@ -42,7 +42,7 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
         float2( 0.5, -0.5)
     };
 
-    o.col = in.color;
+    o.col[1] = cam_data.proj_mat[0][0];
 
     o.pos = float4(p[id], 0.0, 1.0);
     return o;
