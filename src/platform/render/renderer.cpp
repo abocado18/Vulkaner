@@ -84,7 +84,7 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
   builder.makeGraphicsDefault();
 
   _pipeline_manager->createGraphicsPipeline(
-      builder, std::array<std::string, 4>{"triangle", "vertexMain", "triangle",
+      builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",
                                           "pixelMain"});
 
   _isInitialized = true;
@@ -469,7 +469,8 @@ void VulkanRenderer::initSyncStructures() {
   }
 }
 
-void VulkanRenderer::draw(RenderFrame _render_frame) {
+void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
+                          std::vector<RenderLight> &lights) {
 
   glfwPollEvents();
 
@@ -666,23 +667,6 @@ void VulkanRenderer::draw(RenderFrame _render_frame) {
                          VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &range);
   }
 
-  for (auto &m : _render_frame.meshes) {
-
-    auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
-
-    VkDeviceSize vertex_offset = m.vertex.offset;
-
-    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &vertex_buffer.buffer,
-                           &vertex_offset);
-
-    VkDeviceSize index_offset = vertex_offset + m.index_offset;
-
-    vkCmdBindIndexBuffer(graphics_command_buffer, vertex_buffer.buffer,
-                         index_offset, VK_INDEX_TYPE_UINT32);
-
-    vkCmdDrawIndexed(graphics_command_buffer, m.index_count, 1, 0, 0, 0);
-  }
-
   _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -692,9 +676,6 @@ void VulkanRenderer::draw(RenderFrame _render_frame) {
       &color_info, 1, {_draw_image.extent.width, _draw_image.extent.height},
       {0, 0}, VK_NULL_HANDLE, VK_NULL_HANDLE);
   vkCmdBeginRendering(graphics_command_buffer, &render_info);
-
-  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    _pipeline_manager->getPipelineByIdx(0).pipeline);
 
   VkViewport viewport = {0,
                          0,
@@ -708,6 +689,42 @@ void VulkanRenderer::draw(RenderFrame _render_frame) {
 
   vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
+
+  // Camera
+
+  std::vector<CombinedResourceIndexAndDescriptorType> cam_resources(1);
+  cam_resources[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+  cam_resources[0].idx = camera.camera_data.id;
+  Descriptor cam_desc = _resource_manager->bindResources(cam_resources);
+
+  for (auto &m : meshes) {
+
+    auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
+
+    VkDeviceSize vertex_offset = m.vertex.offset;
+
+    auto p = _pipeline_manager->getPipelineByIdx(0);
+
+    vkCmdBindDescriptorSets(graphics_command_buffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1,
+                            &cam_desc.set, 1, &camera.camera_data.offset);
+
+    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &vertex_buffer.buffer,
+                           &vertex_offset);
+
+    VkDeviceSize index_offset = vertex_offset + m.index_offset;
+
+    vkCmdBindIndexBuffer(graphics_command_buffer, vertex_buffer.buffer,
+                         index_offset, VK_INDEX_TYPE_UINT32);
+
+    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      _pipeline_manager->getPipelineByIdx(0).pipeline);
+
+    vkCmdDrawIndexed(graphics_command_buffer, m.index_count, 1, 0, 0, 0);
+  }
+
+  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    _pipeline_manager->getPipelineByIdx(0).pipeline);
 
   vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
 

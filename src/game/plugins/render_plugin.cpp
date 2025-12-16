@@ -130,15 +130,10 @@ void RenderPlugin::build(game::Game &game) {
             });
           });
 
-  game.world.addSystem<Res<IRenderer *>, Res<ExtractedRendererResources>>(
+  game.world.addSystem<Res<IRenderer *>, ResMut<ExtractedRendererResources>>(
       game.Render,
-      [](auto view, IRenderer *r, const ExtractedRendererResources &resources) {
-        RenderFrame render_frame{};
-        render_frame.meshes = resources.meshes;
-        render_frame.lights = resources.lights;
-        render_frame.camera = resources.camera;
-
-        r->draw(render_frame);
+      [](auto view, IRenderer *r, ExtractedRendererResources &resources) {
+        r->draw(resources.camera, resources.meshes, resources.lights);
       });
 
 #pragma region Add Gpu Components

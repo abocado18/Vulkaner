@@ -182,6 +182,8 @@ struct CombinedResourceIndexAndDescriptorType {
   CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type)
       : idx(idx), type(type) {}
 
+  CombinedResourceIndexAndDescriptorType() : idx(SIZE_MAX), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {}    
+
   size_t idx;
   VkDescriptorType type;
 

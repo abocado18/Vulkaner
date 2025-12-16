@@ -45,16 +45,14 @@ struct FrameData {
   DeletionQueue<> _deletion_queue;
 };
 
-
-
 // Common Renderer Abstraction Interface, to do: replace vulkan objects with
 // general ones once you have a second graphics api
 class IRenderer {
 public:
-
   virtual ~IRenderer() = default;
 
-  virtual void draw(RenderFrame _render_frame) = 0;
+  virtual void draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
+                    std::vector<RenderLight> &lights) = 0;
 
   virtual ResourceHandle createBuffer(size_t size,
                                       VkBufferUsageFlags usage_flags) = 0;
@@ -87,7 +85,8 @@ public:
     return !glfwWindowShouldClose(_window_handle);
   }
 
-  void draw(RenderFrame _render_frame) override;
+  void draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
+                    std::vector<RenderLight> &lights) override;
 
   ResourceHandle createBuffer(size_t size,
                               VkBufferUsageFlags usage_flags) override;
@@ -147,10 +146,6 @@ private:
 
   DescriptorAllocatorGrowable _global_descriptor_allocator;
 
-
-
-
-
   VkDescriptorPool _imm_pool;
 
   std::array<FrameData, FRAMES_IN_FLIGHT> _frames;
@@ -173,16 +168,11 @@ private:
 
   void resizeSwapchain();
 
-
-
   void initCommands();
 
   void initSyncStructures();
 
   void initDescriptors();
 
-
-
   void initImgui();
-
 };

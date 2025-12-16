@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 struct BufferIdAndOffset {
   uint32_t id;
@@ -48,8 +49,4 @@ struct RenderLight {
 };
 
 
-struct RenderFrame {
-  RenderCamera camera {};
-  std::span<const RenderMesh> meshes {};
-  std::span<const RenderLight> lights {};
-};
+
