@@ -5,8 +5,10 @@
 #include "game/plugins/asset_plugin.h"
 #include "game/plugins/scene_plugin.h"
 #include "nlohmann/json.hpp"
+#include "platform/render/render_object.h"
 #include "platform/render/resources.h"
 #include <unordered_map>
+#include <vector>
 
 // Keep track on loaded meshes
 struct MeshCpuData {
@@ -14,13 +16,15 @@ struct MeshCpuData {
 };
 
 struct MeshGpuData {
-  BufferHandle vertex_index_buffer_handle{};
+  BufferHandle vertex_index_buffer_handle{}; // Handle to Gpu Buffer
   size_t index_number;
   size_t index_byte_offset;
 };
 
-struct LoadedMeshesResource {
-  std::unordered_map<std::string, MeshCpuData> data_map{};
+struct ExtractedRendererResources {
+  RenderCamera camera{};
+  std::vector<RenderMesh> meshes{};
+  std::vector<RenderLight> lights{};
 };
 
 struct Mesh {
@@ -34,6 +38,10 @@ struct GpuMesh {
 
 struct GpuTransform {
   BufferHandle transform_handle;
+};
+
+struct GpuCamera {
+  BufferHandle camera_mat_handle {};
 };
 
 struct GpuMaterial {

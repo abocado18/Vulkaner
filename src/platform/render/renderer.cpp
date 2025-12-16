@@ -123,6 +123,8 @@ VulkanRenderer::~VulkanRenderer() {
       vkDestroyFence(_device, _frames[i]._render_fence, nullptr);
     }
 
+    delete _resource_manager;
+
     _main_deletion_queue.flush();
 
     destroySwapchain();
@@ -146,8 +148,6 @@ VulkanRenderer::~VulkanRenderer() {
 void VulkanRenderer::initDescriptors() {
 
   _resource_manager = new ResourceManager(_device, _chosen_gpu, _allocator);
-
-  _main_deletion_queue.pushFunction([&] { delete _resource_manager; });
 }
 
 bool VulkanRenderer::initVulkan() {
@@ -469,7 +469,7 @@ void VulkanRenderer::initSyncStructures() {
   }
 }
 
-void VulkanRenderer::draw(std::vector<RenderObject> &render_objects) {
+void VulkanRenderer::draw(RenderFrame _render_frame) {
 
   glfwPollEvents();
 
@@ -651,9 +651,6 @@ void VulkanRenderer::draw(std::vector<RenderObject> &render_objects) {
              "Start Command Buffer");
   }
 
-  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
-                             VK_IMAGE_LAYOUT_GENERAL, _draw_image.image);
-
   _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
                                       VK_IMAGE_LAYOUT_GENERAL);
 
@@ -667,6 +664,23 @@ void VulkanRenderer::draw(std::vector<RenderObject> &render_objects) {
 
     vkCmdClearColorImage(graphics_command_buffer, _draw_image.image,
                          VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &range);
+  }
+
+  for (auto &m : _render_frame.meshes) {
+
+    auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
+
+    VkDeviceSize vertex_offset = m.vertex.offset;
+
+    vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &vertex_buffer.buffer,
+                           &vertex_offset);
+
+    VkDeviceSize index_offset = vertex_offset + m.index_offset;
+
+    vkCmdBindIndexBuffer(graphics_command_buffer, vertex_buffer.buffer,
+                         index_offset, VK_INDEX_TYPE_UINT32);
+
+    vkCmdDrawIndexed(graphics_command_buffer, m.index_count, 1, 0, 0, 0);
   }
 
   _resource_manager->transistionImage(graphics_command_buffer, _draw_image,

@@ -51,7 +51,10 @@ struct FrameData {
 // general ones once you have a second graphics api
 class IRenderer {
 public:
-  virtual void draw(std::vector<RenderObject> &render_objects) = 0;
+
+  virtual ~IRenderer() = default;
+
+  virtual void draw(RenderFrame _render_frame) = 0;
 
   virtual ResourceHandle createBuffer(size_t size,
                                       VkBufferUsageFlags usage_flags) = 0;
@@ -78,13 +81,13 @@ public:
 class VulkanRenderer : public IRenderer {
 public:
   VulkanRenderer(uint32_t width, uint32_t height);
-  ~VulkanRenderer();
+  ~VulkanRenderer() override;
 
   inline bool shouldRun() override {
     return !glfwWindowShouldClose(_window_handle);
   }
 
-  void draw(std::vector<RenderObject> &render_objects) override;
+  void draw(RenderFrame _render_frame) override;
 
   ResourceHandle createBuffer(size_t size,
                               VkBufferUsageFlags usage_flags) override;

@@ -1,22 +1,55 @@
 #pragma once
+#include "platform/math/math.h"
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
-struct RenderObject {
+struct BufferIdAndOffset {
+  uint32_t id;
+  uint32_t offset;
+};
 
-  size_t vertex_buffer_id;
-  uint32_t vertex_offset;
+struct GpuCameraData {
+  Mat4<float> proj_matrix;
+  Mat4<float> view_matrix;
+};
 
-  size_t transform_buffer_id;
-  uint32_t transform_offset;
+struct RenderCamera {
+  BufferIdAndOffset camera_data {};
+};
 
-  uint32_t instance_count;
+struct RenderMesh {
+  BufferIdAndOffset vertex{};
+  BufferIdAndOffset transform{};
 
   uint32_t index_count;
   uint32_t index_offset;
 
-  size_t material_buffer_id;
-  uint32_t material_offset;
+  BufferIdAndOffset material{};
 
-  size_t pipeline_id;
+  uint32_t pipeline_id;
+};
+
+struct GpuLightData {
+
+  Vec3<float> color;
+  float range;
+  float intensity;
+  uint32_t type;
+  uint32_t _pad[2];
+};
+
+static_assert(sizeof(GpuLightData) % 16 == 0);
+
+struct RenderLight {
+
+  BufferIdAndOffset transform{};
+  BufferIdAndOffset light{};
+};
+
+
+struct RenderFrame {
+  RenderCamera camera {};
+  std::span<const RenderMesh> meshes {};
+  std::span<const RenderLight> lights {};
 };

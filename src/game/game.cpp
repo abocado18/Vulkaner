@@ -52,6 +52,10 @@ void game::Game::tick() {
   runAndExecute(world, PostUpdate);
 
   runAndExecute(world, PreRender);
+
+  runAndExecute(world, Extract);
+
+
   runAndExecute(world, Render);
   runAndExecute(world, PostRender);
 

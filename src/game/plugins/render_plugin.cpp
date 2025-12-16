@@ -2,6 +2,7 @@
 #include "game/ecs/vox_ecs.h"
 #include "game/game.h"
 #include "game/plugins/asset_plugin.h"
+#include "game/plugins/camera_plugin.h"
 #include "game/plugins/default_components_plugin.h"
 #include "game/plugins/registry_plugin.h"
 #include "game/plugins/scene_plugin.h"
@@ -26,9 +27,9 @@ void RenderPlugin::build(game::Game &game) {
 
   game.world.insertResource<IRenderer *>(r);
 
-  game.world.insertResource<LoadedMeshesResource>({});
-
   game.world.insertResource<Assets<MeshGpuData>>({});
+
+  game.world.insertResource<ExtractedRendererResources>({});
 
   auto *reg = game.world.getResource<ComponentRegistry>();
 
@@ -39,8 +40,6 @@ void RenderPlugin::build(game::Game &game) {
 
     Mesh m{};
     m.id = j.get<size_t>();
-
-    auto *res = world->getResource<Assets<MeshCpuData>>();
 
     m.scene_handle = *scene_name_handle;
 
@@ -76,24 +75,123 @@ void RenderPlugin::build(game::Game &game) {
         }
       });
 
-  game.world
-      .addSystem<vecs::ResMut<VulkanRenderer *>, vecs::ResMut<vecs::Commands>>(
-          game.OnClose, [](auto view, VulkanRenderer *r, vecs::Commands &cmd) {
-            // Gets only called once
+  game.world.addSystem<vecs::ResMut<IRenderer *>, vecs::ResMut<vecs::Commands>>(
+      game.OnClose, [](auto view, IRenderer *r, vecs::Commands &cmd) {
+        // Gets only called once
 
-            cmd.push([r](vecs::Ecs *world) { delete r; });
+        cmd.push([r](vecs::Ecs *world) { delete r; });
+      });
+
+  game.world.addSystem<Read<GpuCamera>, ResMut<ExtractedRendererResources>>(
+      game.Extract,
+      [](auto view, ExtractedRendererResources &render_resources) {
+        view.forEach([](auto view, Entity e, const GpuCamera &gpu_cam,
+                        ExtractedRendererResources &render_res) {
+          render_res.camera.camera_data.id =
+              gpu_cam.camera_mat_handle.getBufferIndex();
+          render_res.camera.camera_data.offset =
+              gpu_cam.camera_mat_handle.getBufferSpace()[0];
+        });
+      });
+
+  game.world
+      .addSystem<Read<GpuTransform>, Read<GpuMesh>, Res<Assets<MeshGpuData>>,
+                 ResMut<ExtractedRendererResources>>(
+          game.Extract,
+          [](auto view, const Assets<MeshGpuData> &mesh_gpu_data_asset,
+             ExtractedRendererResources &resources) {
+            resources.meshes.clear();
+
+            view.forEach([](auto view, Entity e,
+                            const GpuTransform &gpu_transform,
+                            const GpuMesh &gpu_mesh,
+                            const Assets<MeshGpuData> &mesh_gpu_data_asset,
+                            ExtractedRendererResources &resources) {
+              const MeshGpuData *gpu_data =
+                  mesh_gpu_data_asset.getConstAsset(gpu_mesh.mesh_gpu_data);
+
+              uint32_t vertex_index =
+                  gpu_data->vertex_index_buffer_handle.getBufferIndex();
+              const auto vertex_space =
+                  gpu_data->vertex_index_buffer_handle.getBufferSpace();
+
+              RenderMesh render_mesh{};
+              render_mesh.index_count = gpu_data->index_number;
+              render_mesh.index_offset = gpu_data->index_byte_offset;
+              render_mesh.vertex.id = vertex_index;
+              render_mesh.vertex.offset = vertex_space[0];
+              render_mesh.pipeline_id = 0;
+              render_mesh.transform.id =
+                  gpu_transform.transform_handle.getBufferIndex();
+              render_mesh.transform.offset =
+                  gpu_transform.transform_handle.getBufferSpace()[0];
+
+              resources.meshes.push_back(render_mesh);
+            });
           });
 
-  game.world.addSystem<Read<GpuTransform>, ResMut<IRenderer *>,
-                       Res<RenderBuffersResource>>(
-      game.Render, [](auto view, IRenderer *renderer,
-                      const RenderBuffersResource &render_buffers) {
-        std::vector<RenderObject> render_objects{};
+  game.world.addSystem<Res<IRenderer *>, Res<ExtractedRendererResources>>(
+      game.Render,
+      [](auto view, IRenderer *r, const ExtractedRendererResources &resources) {
+        RenderFrame render_frame{};
+        render_frame.meshes = resources.meshes;
+        render_frame.lights = resources.lights;
+        render_frame.camera = resources.camera;
 
-        renderer->draw(render_objects);
+        r->draw(render_frame);
       });
 
 #pragma region Add Gpu Components
+
+  game.world.addSystem<Added<Read<Camera>>, Read<Transform>,
+                       Res<RenderBuffersResource>, ResMut<IRenderer *>,
+                       ResMut<Commands>>(
+      game.PreRender,
+      [](auto view, const RenderBuffersResource &buffers_resource,
+         IRenderer *renderer, Commands &cmd) {
+        view.forEach([](auto view, Entity e, const Camera &cam,
+                        const Transform &transform,
+                        const RenderBuffersResource &buffers_resource,
+                        IRenderer *renderer, Commands &cmd) {
+          GpuCamera gpu_cam{};
+
+          auto transform_buffer_handle =
+              buffers_resource.data.at(BufferType::Transform);
+
+          GpuCameraData camera_data{};
+
+          switch (cam.type) {
+
+          case CameraType::PERSPECTIVE:
+
+            camera_data.proj_matrix = Mat4<float>::perspective(
+                cam.fov, cam.aspct_ratio, cam.z_near, cam.z_far);
+
+            break;
+          case CameraType::ORTHOGRAPHIC:
+
+            std::cerr << "Orthographic camera not supported yet\n";
+            return;
+
+            break;
+          }
+
+          Vec3<float> forward_vector =
+              transform.rotation * Vec3<float>(0.0f, 0.0f, -1.0f);
+
+          camera_data.view_matrix = Mat4<float>::lookAt(
+              transform.translation, Vec3<float>(0.0f, 1.0f, 0.0f),
+              transform.translation + forward_vector);
+
+          gpu_cam.camera_mat_handle = renderer->writeBuffer(
+              transform_buffer_handle, &camera_data, sizeof(camera_data),
+              UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
+
+          cmd.push([e, gpu_cam](Ecs *world) {
+            world->addComponent<GpuCamera>(e, gpu_cam);
+          });
+        });
+      });
 
   game.world.addSystem<Added<Read<Transform>>, Res<RenderBuffersResource>,
                        ResMut<IRenderer *>, ResMut<Commands>>(
@@ -119,100 +217,102 @@ void RenderPlugin::build(game::Game &game) {
         });
       });
 
-  game.world
-      .addSystem<Added<Write<Mesh>>, Res<RenderBuffersResource>,
-                 ResMut<IRenderer *>, ResMut<Commands>,
-                 Res<Assets<LoadSceneName>>, ResMut<LoadedMeshesResource>>(
-          game.PreRender,
-          [](auto view, const RenderBuffersResource &buffers_res,
-             IRenderer *renderer, Commands &cmd,
-             const Assets<LoadSceneName> &scene_names,
-             LoadedMeshesResource &load_meshes_res) {
-            //
-            view.forEach([](auto view, Entity e, Mesh &m,
-                            const RenderBuffersResource &buffers_res,
-                            IRenderer *renderer, Commands &cmd,
-                            const Assets<LoadSceneName> &scene_names,
-                            LoadedMeshesResource &load_meshes_res) {
-              auto transform_buffer = buffers_res.data.at(BufferType::Vertex);
+  game.world.addSystem<Added<Write<Mesh>>, Res<RenderBuffersResource>,
+                       ResMut<IRenderer *>, ResMut<Commands>,
+                       Res<Assets<LoadSceneName>>, ResMut<Assets<MeshGpuData>>>(
+      game.PreRender, [](auto view, const RenderBuffersResource &buffers_res,
+                         IRenderer *renderer, Commands &cmd,
+                         const Assets<LoadSceneName> &scene_names,
+                         Assets<MeshGpuData> &mesh_gpu_data) {
+        //
+        view.forEach([](auto view, Entity e, Mesh &m,
+                        const RenderBuffersResource &buffers_res,
+                        IRenderer *renderer, Commands &cmd,
+                        const Assets<LoadSceneName> &scene_names,
+                        Assets<MeshGpuData> &mesh_gpu_data_assets) {
+          auto transform_buffer = buffers_res.data.at(BufferType::Vertex);
 
-              const auto *load_scene_name =
-                  scene_names.getConstAsset(m.scene_handle);
+          const auto *load_scene_name =
+              scene_names.getConstAsset(m.scene_handle);
 
-              const std::string &scene_path = load_scene_name->scene_path;
+          const std::string &scene_path = load_scene_name->scene_path;
 
-              const std::string mesh_data_path =
-                  scene_path + "meshes/" + std::to_string(m.id) + ".json";
-              const std::string mesh_bin_path =
-                  scene_path + "meshes/" + std::to_string(m.id) + ".bin";
+          const std::string mesh_data_path =
+              scene_path + "meshes/" + std::to_string(m.id) + ".json";
+          const std::string mesh_bin_path =
+              scene_path + "meshes/" + std::to_string(m.id) + ".bin";
 
-              auto it = load_meshes_res.data_map.find(mesh_data_path);
+          bool already_registered =
+              mesh_gpu_data_assets.isPathRegistered(mesh_data_path);
 
-              if (it != load_meshes_res.data_map.end()) {
+          GpuMesh gpu_mesh{};
 
-                if (it->second.loaded == true) {
+          if (already_registered) {
 
-                  // Mesh already loaded
-                }
+            std::cout << "Mesh already loaded: " << mesh_data_path << "\n";
+
+            gpu_mesh.mesh_gpu_data =
+                mesh_gpu_data_assets.getAssetHandle(mesh_data_path);
+
+          } else {
+            std::cout << "Mesh Path: " << mesh_data_path << "\n";
+
+            json mesh_json;
+            {
+              std::ifstream file(mesh_data_path);
+
+              if (!file.is_open()) {
+                return;
               }
 
-              std::cout << "Mesh Path: " << mesh_data_path << "\n";
+              mesh_json = json::parse(file);
 
-              json mesh_json;
-              {
-                std::ifstream file(mesh_data_path);
+              file.close();
 
-                if (!file.is_open()) {
-                  return;
-                }
-
-                mesh_json = json::parse(file);
-
-                file.close();
-
-                if (mesh_json.is_discarded()) {
-                  return;
-                }
+              if (mesh_json.is_discarded()) {
+                return;
               }
+            }
 
-              size_t index_byte_offset =
-                  mesh_json["Index Byte Offset"].get<size_t>();
-              size_t index_number = mesh_json["Index Number"].get<size_t>();
-              size_t vertex_number = mesh_json["Vertex Number"].get<size_t>();
+            size_t index_byte_offset =
+                mesh_json["Index Byte Offset"].get<size_t>();
+            size_t index_number = mesh_json["Index Number"].get<size_t>();
+            size_t vertex_number = mesh_json["Vertex Number"].get<size_t>();
 
-              auto loadBinaryData =
-                  [](const std::string &path) -> std::vector<unsigned char> {
-                std::ifstream file(path, std::ios::binary);
+            auto loadBinaryData =
+                [](const std::string &path) -> std::vector<unsigned char> {
+              std::ifstream file(path, std::ios::binary);
 
-                if (!file.is_open())
-                  return {};
+              if (!file.is_open())
+                return {};
 
-                std::vector<unsigned char> data(
-                    std::istreambuf_iterator<char>(file), {});
+              std::vector<unsigned char> data(
+                  std::istreambuf_iterator<char>(file), {});
 
-                return data;
-              };
+              return data;
+            };
 
-              std::vector<unsigned char> mesh_bin_data =
-                  loadBinaryData(mesh_bin_path);
+            std::vector<unsigned char> mesh_bin_data =
+                loadBinaryData(mesh_bin_path);
 
-              GpuMesh gpu_mesh{};
+            MeshGpuData gpu_data{};
+            gpu_data.index_byte_offset = index_byte_offset;
+            gpu_data.index_number = index_number;
 
-              gpu_mesh.vertex_index_buffer_handle = renderer->writeBuffer(
-                  transform_buffer, mesh_bin_data.data(),
-                  mesh_bin_data.size() * sizeof(unsigned char), UINT32_MAX,
-                  VK_ACCESS_SHADER_READ_BIT);
+            gpu_data.vertex_index_buffer_handle = renderer->writeBuffer(
+                transform_buffer, mesh_bin_data.data(),
+                mesh_bin_data.size() * sizeof(unsigned char), UINT32_MAX,
+                VK_ACCESS_SHADER_READ_BIT);
 
-              gpu_mesh.index_number = index_number;
-              gpu_mesh.index_byte_offset = index_byte_offset;
+            gpu_mesh.mesh_gpu_data =
+                mesh_gpu_data_assets.registerAsset(gpu_data, mesh_data_path);
+          }
 
-              // mesh_data->loaded = true;
-
-              cmd.push([gpu_mesh, e](Ecs *world) {
-                world->addComponent<GpuMesh>(e, gpu_mesh);
-              });
-            });
+          cmd.push([gpu_mesh, e](Ecs *world) {
+            world->addComponent<GpuMesh>(e, gpu_mesh);
           });
+        });
+      });
 
 #pragma endregion
 }

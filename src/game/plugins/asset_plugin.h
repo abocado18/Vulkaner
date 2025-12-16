@@ -21,8 +21,9 @@ private:
 template <typename T> struct Assets {
 
 public:
-  AssetHandle<T> registerAsset(T &&data) {
-    size_t id = next_id++;
+  AssetHandle<T> registerAsset(T &&data, const std::string &asset_path) {
+
+    size_t id = pathToAssetId(asset_path);
     std::shared_ptr<T> ptr = std::make_shared<T>(std::forward<T>(data));
 
     AssetHandle<T> handle(id, ptr);
@@ -30,6 +31,48 @@ public:
     data_map[id] = ptr;
 
     return handle;
+  }
+
+  AssetHandle<T> registerAsset(const T &data, const std::string &asset_path) {
+
+    size_t id = pathToAssetId(asset_path);
+    std::shared_ptr<T> ptr = std::make_shared<T>(data);
+
+    AssetHandle<T> handle(id, ptr);
+
+    data_map[id] = ptr;
+
+    return handle;
+  }
+
+  AssetHandle<T> getAssetHandle(const std::string &asset_path) {
+    size_t id = pathToAssetId(asset_path);
+
+    auto it = data_map.find(id);
+    if (it == data_map.end()) {
+      return {SIZE_MAX, nullptr};
+    }
+
+    std::shared_ptr<T> s_ptr = it->second.lock();
+    if (!s_ptr) {
+      return {SIZE_MAX, nullptr};
+    }
+
+    return {id, s_ptr};
+  }
+
+  bool isPathRegistered(const std::string &path) {
+    auto it = path_to_id.find(path);
+
+    if(it == path_to_id.end())
+      return false;
+
+    std::weak_ptr<T> find_asset = data_map.at(it->second);
+
+    if(find_asset.expired())
+      return false;
+
+    return true;
   }
 
   T *getAsset(AssetHandle<T> handle) {

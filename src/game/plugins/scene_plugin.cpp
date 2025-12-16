@@ -59,7 +59,7 @@ void ScenePlugin::build(game::Game &game) {
           std::cout << "Load Scene: " << scene_path << "\n";
 
           // Cache Scene Name as asset
-          AssetHandle<LoadSceneName> file_handle = asset_scene_names.registerAsset(LoadSceneName{scene_name});
+          AssetHandle<LoadSceneName> file_handle = asset_scene_names.registerAsset(LoadSceneName{scene_name}, scene_path);
 
           cmd.push(
               [e](Ecs *world) { world->removeComponent<LoadSceneName>(e); });

@@ -48,6 +48,7 @@ public:
   vecs::Schedule PostUpdate = {};
 
   vecs::Schedule PreRender {};
+  vecs::Schedule Extract {};
   vecs::Schedule Render {};
   vecs::Schedule PostRender {};
 

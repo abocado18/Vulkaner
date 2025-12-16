@@ -109,7 +109,7 @@ template <typename T> struct Quat {
 
     T sinp = 2 * (q.w * q.y - q.x * q.z);
     if (std::abs(sinp) >= 1)
-      euler.y = std::copysign(M_PI / 2, sinp); 
+      euler.y = std::copysign(M_PI / 2, sinp);
     else
       euler.y = std::asin(sinp);
 
@@ -131,6 +131,26 @@ template <typename T> struct Quat {
     q.z /= len;
 
     return q;
+  }
+
+  Vec3<T> operator*(const Vec3<T> vec) const {
+
+    Quat<T> quat_vec = {vec.x, vec.y, vec.z, 0};
+
+    Quat<T> q_conj = this->conjugate();
+
+    Quat<T> res = *this * quat_vec * q_conj;
+
+    return Vec3<T>{res.x, res.y, res.z};
+  }
+
+  Quat<T> conjugate() const { return Quat<T>{-x, -y, -z, w}; }
+
+  Quat<T> operator*(const Quat<T> &rhs) const {
+    return Quat<T>{w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z,
+                   w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y,
+                   w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x,
+                   w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w};
   }
 };
 

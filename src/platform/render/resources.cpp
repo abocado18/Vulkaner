@@ -287,6 +287,35 @@ ResourceManager::~ResourceManager() {
 
   _dynamic_allocator.destroyPools(_device);
 
+  for (auto &w : writes) {
+    vmaDestroyBuffer(_allocator, w.source_buffer.buffer,
+                     w.source_buffer.allocation);
+  }
+
+  for (auto &r : resources) {
+
+    if (r.second.expired())
+      continue;
+
+    Resource *res = r.second.lock().get();
+
+    if (std::holds_alternative<Image>(res->value)) {
+
+      auto &img = std::get<Image>(res->value);
+      vkDestroyImageView(_device, img.view, nullptr);
+      vmaDestroyImage(_allocator, img.image, img.allocation);
+
+    }
+
+    else {
+
+      auto &buf = std::get<Buffer>(res->value);
+      vmaDestroyBuffer(_allocator, buf.buffer, buf.allocation);
+    }
+  }
+
+  resources.clear();
+
   for (size_t i = 0; i < transient_images_cache.size(); i++) {
     resetAllTransientImages(i);
   }
@@ -297,6 +326,8 @@ ResourceManager::~ResourceManager() {
 
       for (auto &img : images) {
         vkDestroyImageView(_device, img.view, nullptr);
+
+        vmaDestroyImage(_allocator, img.image, img.allocation);
       }
     }
   }
@@ -857,9 +888,10 @@ void ResourceManager::resetAllTransientImages(const uint32_t frame) {
   cache.used_transient_images.clear();
 }
 
-void ResourceManager::transistionImage(
-    VkCommandBuffer cmd, Image &image, VkImageLayout new_layout,
-    uint32_t old_family_queue, uint32_t new_family_queue) {
+void ResourceManager::transistionImage(VkCommandBuffer cmd, Image &image,
+                                       VkImageLayout new_layout,
+                                       uint32_t old_family_queue,
+                                       uint32_t new_family_queue) {
 
   vk_utils::transistionImage(cmd, image.current_layout, new_layout, image.image,
                              old_family_queue, new_family_queue);
