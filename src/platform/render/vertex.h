@@ -9,11 +9,14 @@ namespace vertex {
 
 struct Vertex {
 
-  alignas(16) std::array<float, 3> position;
+  std::array<float, 3> position;
+  uint32_t _pad0;
 
-  alignas(16) std::array<float, 3> color;
+  std::array<float, 3> color;
+  uint32_t _pad1;
 
-  alignas(16) std::array<float, 3> normals;
+  std::array<float, 3> normals;
+  uint32_t _pad2;
 
   std::array<float, 2> tex_coords_0;
   std::array<float, 2> tex_coords_1;

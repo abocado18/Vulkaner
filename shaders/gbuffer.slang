@@ -18,8 +18,21 @@ struct CamData {
 };
 
 
+struct Transform {
+
+
+    float4x4 transform_matrix;
+
+
+};
+
+
 [vk_binding(0, 0)]
 ConstantBuffer<CamData> cam_data;
+
+
+[vk_binding(0, 1)]
+ConstantBuffer<Transform> transform;
 
 
 
@@ -36,20 +49,18 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
      VsOutput o;
 
    
-    float2 p[3] = {
-        float2( 0.0,  0.5),
-        float2(-0.5, -0.5),
-        float2( 0.5, -0.5)
-    };
+     float4 worldPos = mul(transform.transform_matrix, float4(in.position, 1.0));
+     float4 viewPos = mul(cam_data.view_mat, worldPos);
+     o.pos = mul(cam_data.proj_mat, viewPos);
 
     o.col[1] = cam_data.proj_mat[0][0];
 
-    o.pos = float4(p[id], 0.0, 1.0);
+   
     return o;
 }
 
 [shader("fragment")]
 float4 pixelMain(VsOutput in)
 {
-    return float4(in.col, 1.0);
+    return float4(1.0, 0.0, 0.0, 1.0);
 }

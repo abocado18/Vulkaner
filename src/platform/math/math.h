@@ -335,8 +335,8 @@ template <typename T> struct Mat4 {
 
     proj(0, 0) = f / aspect;
     proj(1, 1) = f;
-    proj(2, 2) = far_plane / (near_plane - far_plane);
-    proj(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
+    proj(2, 2) = far_plane / (far_plane - near_plane);
+    proj(2, 3) = (-far_plane * near_plane) / (far_plane - near_plane);
     proj(3, 2) = -1;
     proj(3, 3) = 0;
 

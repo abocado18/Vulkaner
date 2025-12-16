@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "GLFW/glfw3.h"
 #include "game/plugins/render_plugin.h"
+#include "platform/math/math.h"
 #include "platform/render/allocator/vk_mem_alloc.h"
 #include "platform/render/pipeline.h"
 #include "platform/render/render_object.h"
@@ -83,6 +84,7 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
 
   PipelineBuilder2 builder{};
   builder.makeGraphicsDefault();
+  builder.depth_stencil_info.depthTestEnable = VK_FALSE;
 
   _pipeline_manager->createGraphicsPipeline(
       builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",
@@ -702,15 +704,27 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   Descriptor cam_desc = _resource_manager->bindResources(
       cam_resources, p.set_layouts[0]); // Bind to first Descriptor Set
 
+  std::vector<CombinedResourceIndexAndDescriptorType> transform_resources(1);
+
   for (auto &m : meshes) {
 
-    auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
+    transform_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    transform_resources[0].idx = m.transform.id;
+    transform_resources[0].size = sizeof(Mat4<float>);
+    Descriptor transform_desc =
+        _resource_manager->bindResources(transform_resources, p.set_layouts[1]);
 
-    VkDeviceSize vertex_offset = m.vertex.offset;
+    vkCmdBindDescriptorSets(graphics_command_buffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 1, 1,
+                            &transform_desc.set, 1, &m.transform.offset);
 
     vkCmdBindDescriptorSets(graphics_command_buffer,
                             VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1,
                             &cam_desc.set, 1, &camera.camera_data.offset);
+
+    auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
+
+    VkDeviceSize vertex_offset = m.vertex.offset;
 
     vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &vertex_buffer.buffer,
                            &vertex_offset);
@@ -725,11 +739,6 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
     vkCmdDrawIndexed(graphics_command_buffer, m.index_count, 1, 0, 0, 0);
   }
-
-  vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    _pipeline_manager->getPipelineByIdx(0).pipeline);
-
-  vkCmdDraw(graphics_command_buffer, 3, 1, 0, 0);
 
   vkCmdEndRendering(graphics_command_buffer);
 
