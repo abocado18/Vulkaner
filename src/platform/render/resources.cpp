@@ -271,8 +271,8 @@ ResourceManager::ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
 
   DescriptorAllocatorGrowable::PoolSizeRatio ratios[] = {
 
-      {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .ratio = 3.0f},
-      {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .ratio = 3.0f},
+      {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .ratio = 3.0f},
+      {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, .ratio = 3.0f},
       {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .ratio = 4.0f},
       {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .ratio = 2.0f},
 
@@ -380,7 +380,8 @@ ResourceHandle ResourceManager::createBuffer(size_t size,
 }
 
 Descriptor ResourceManager::bindResources(
-    std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind) {
+    std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind,
+    VkDescriptorSetLayout layout) {
 
   Descriptor set;
 
@@ -424,13 +425,7 @@ Descriptor ResourceManager::bindResources(
 
   } else {
 
-    DescriptorSetLayoutBuilder builder;
-
-    for (size_t i = 0; i < searched_types.size(); i++) {
-
-      builder.addBinding(i, searched_types[i]);
-    }
-    set.layout = builder.build(_device, VK_SHADER_STAGE_ALL);
+    set.layout = layout;
     set.set = _dynamic_allocator.allocate(_device, set.layout);
   }
 
@@ -454,7 +449,8 @@ Descriptor ResourceManager::bindResources(
     } else {
       Buffer &buf = std::get<Buffer>(r->value);
 
-      writer.writeBuffer(i, buf.buffer, buf.size, 0, searched_types[i]);
+      writer.writeBuffer(i, buf.buffer, resources_to_bind[i].size, 0,
+                         searched_types[i]);
     }
   }
 

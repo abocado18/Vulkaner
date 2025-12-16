@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "GLFW/glfw3.h"
+#include "game/plugins/render_plugin.h"
 #include "platform/render/allocator/vk_mem_alloc.h"
 #include "platform/render/pipeline.h"
 #include "platform/render/render_object.h"
@@ -690,20 +691,22 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
+  auto p = _pipeline_manager->getPipelineByIdx(0);
+
   // Camera
 
   std::vector<CombinedResourceIndexAndDescriptorType> cam_resources(1);
   cam_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
   cam_resources[0].idx = camera.camera_data.id;
-  Descriptor cam_desc = _resource_manager->bindResources(cam_resources);
+  cam_resources[0].size = sizeof(GpuCameraData);
+  Descriptor cam_desc = _resource_manager->bindResources(
+      cam_resources, p.set_layouts[0]); // Bind to first Descriptor Set
 
   for (auto &m : meshes) {
 
     auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
 
     VkDeviceSize vertex_offset = m.vertex.offset;
-
-    auto p = _pipeline_manager->getPipelineByIdx(0);
 
     vkCmdBindDescriptorSets(graphics_command_buffer,
                             VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1,

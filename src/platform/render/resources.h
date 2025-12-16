@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -179,13 +180,16 @@ private:
 
 struct CombinedResourceIndexAndDescriptorType {
 
-  CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type)
-      : idx(idx), type(type) {}
+  CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type,
+                                         size_t size)
+      : idx(idx), type(type), size(size) {}
 
-  CombinedResourceIndexAndDescriptorType() : idx(SIZE_MAX), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {}    
+  CombinedResourceIndexAndDescriptorType()
+      : idx(SIZE_MAX), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), size(0) {}
 
   size_t idx;
   VkDescriptorType type;
+  size_t size;
 
   bool operator==(const CombinedResourceIndexAndDescriptorType &other) const {
 
@@ -197,9 +201,17 @@ namespace std {
 template <> struct hash<CombinedResourceIndexAndDescriptorType> {
   size_t
   operator()(const CombinedResourceIndexAndDescriptorType &x) const noexcept {
-    size_t h1 = std::hash<size_t>{}(x.idx);
-    size_t h2 = std::hash<int>{}(static_cast<int>(x.type));
-    return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+    size_t seed = 0;
+
+    auto hash_combine = [&seed](size_t h) {
+      seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+    };
+
+    hash_combine(std::hash<size_t>{}(x.idx));
+    hash_combine(std::hash<int>{}(static_cast<int>(x.type)));
+    hash_combine(std::hash<size_t>{}(x.size));
+
+    return seed;
   }
 };
 } // namespace std
@@ -320,7 +332,7 @@ public:
   void removeResource(size_t idx) { resources.erase(idx); }
 
   Descriptor bindResources(
-      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind);
+      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind, VkDescriptorSetLayout _layout);
 
   const std::vector<ResourceWriteInfo> &getWrites() const { return writes; }
 
