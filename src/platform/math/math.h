@@ -44,6 +44,11 @@ template <typename T> struct Vec3 {
     return len != 0 ? (*this) * (1 / len) : *this;
   }
 
+  float dot(const Vec3<T> &other) const {
+
+    return x * other.x + y * other.y + z * other.z;
+  }
+
   static Vec3 forward() { return {0, 0, -1}; }
   static Vec3 right() { return {1, 0, 0}; }
   static Vec3 up() { return {0, 1, 0}; }
@@ -133,13 +138,15 @@ template <typename T> struct Quat {
     return q;
   }
 
-  Vec3<T> operator*(const Vec3<T> vec) const {
+  Vec3<T> operator*(const Vec3<T> &vec) const {
 
     Quat<T> quat_vec = {vec.x, vec.y, vec.z, 0};
 
-    Quat<T> q_conj = this->conjugate();
+    auto v = this->normalized();
 
-    Quat<T> res = *this * quat_vec * q_conj;
+    Quat<T> q_conj = v.conjugate();
+
+    Quat<T> res = v * quat_vec * q_conj;
 
     return Vec3<T>{res.x, res.y, res.z};
   }
@@ -208,6 +215,16 @@ template <typename T> struct Mat4 {
     return values[3] == 0 && values[7] == 0 && values[11] == 0 &&
            values[15] == 1;
   }
+
+  Mat4<T> transpose() {
+
+    Mat4<T> transposed_m = {values[0], values[4], values[8],  values[12],
+                            values[1], values[5], values[9],  values[13],
+                            values[2], values[6], values[10], values[14],
+                            values[3], values[7], values[11], values[15]};
+
+    return transposed_m;
+  };
 
   Mat4 inverse() {
 
@@ -329,14 +346,17 @@ template <typename T> struct Mat4 {
 
   static Mat4<T> perspective(T fov_y, T aspect, T near_plane, T far_plane) {
 
-    T f = 1 / std::tan(fov_y * 0.5);
+    T e = static_cast<T>(1) / (std::tan(fov_y / static_cast<T>(2)));
 
     Mat4<T> proj = Mat4<T>::identity();
 
-    proj(0, 0) = f / aspect;
-    proj(1, 1) = f;
+    proj(0, 0) = e / aspect;
+    proj(1, 1) = e;
+
     proj(2, 2) = far_plane / (far_plane - near_plane);
-    proj(2, 3) = (-far_plane * near_plane) / (far_plane - near_plane);
+    proj(2, 3) = -(far_plane * near_plane) / (far_plane - near_plane);
+
+
     proj(3, 2) = -1;
     proj(3, 3) = 0;
 
@@ -349,10 +369,12 @@ template <typename T> struct Mat4 {
 
     ortho(0, 0) = 2 / (right - left);
     ortho(1, 1) = 2 / (top - bottom);
-    ortho(2, 2) = 1 / (near_plane - far_plane);
-    ortho(0, 3) = -(right + left) / (right - left);
-    ortho(1, 3) = -(top + bottom) / (top - bottom);
-    ortho(2, 3) = near_plane / (near_plane - far_plane);
+    ortho(2, 2) = -2 / (far_plane - near_plane);
+
+    ortho(0, 3) = -((right + left) / (right - left));
+    ortho(1, 3) = -((top + bottom) / (top - bottom));
+    ortho(2, 3) = -((far_plane + near_plane) / (far_plane - near_plane));
+    ortho(3, 3) = 1;
 
     return ortho;
   }
@@ -360,27 +382,32 @@ template <typename T> struct Mat4 {
   static Mat4<T> lookAt(const Vec3<T> &eye, const Vec3<T> &up,
                         const Vec3<T> &center) {
 
-    Vec3<T> f = (center - eye).normalized();
-    Vec3<T> s = f.cross(up).normalized();
-    Vec3<T> u = s.cross(f);
+    Vec3<T> z_axis = (eye - center);
+    z_axis = z_axis.normalized();
+
+    Vec3<T> x_axis = up.cross(z_axis);
+    x_axis = x_axis.normalized();
+
+    Vec3<T> y_axis = z_axis.cross(x_axis);
 
     Mat4<T> view = Mat4<T>::identity();
 
-    view(0, 0) = s.x;
-    view(1, 0) = s.y;
-    view(2, 0) = s.z;
-
-    view(0, 1) = u.x;
-    view(1, 1) = u.y;
-    view(2, 1) = u.z;
-
-    view(0, 2) = -f.x;
-    view(1, 2) = -f.y;
-    view(2, 2) = -f.z;
-
-    view(0, 3) = -s.x * eye.x - s.y * eye.y - s.z * eye.z;
-    view(1, 3) = -u.x * eye.x - u.y * eye.y - u.z * eye.z;
-    view(2, 3) = -f.x * eye.x - f.y * eye.y - f.z * eye.z;
+    view(0, 0) = x_axis.x;
+    view(0, 1) = x_axis.y;
+    view(0, 2) = x_axis.z;
+    view(0, 3) = -x_axis.dot(eye);
+    view(1, 0) = y_axis.x;
+    view(1, 1) = y_axis.y;
+    view(1, 2) = y_axis.z;
+    view(1, 3) = -y_axis.dot(eye);
+    view(2, 0) = z_axis.x;
+    view(2, 1) = z_axis.y;
+    view(2, 2) = z_axis.z;
+    view(2, 3) = -z_axis.dot(eye);
+    view(3, 0) = 0;
+    view(3, 1) = 0;
+    view(3, 2) = 0;
+    view(3, 3) = 1;
 
     return view;
   }
@@ -429,9 +456,9 @@ template <typename T> struct Mat4 {
     return m;
   }
 
-  T &operator()(const size_t i, const size_t j) { return values[j * 4 + i]; };
+  T &operator()(const size_t i, const size_t j) { return values[i * 4 + j]; }
 
   const T &operator()(const size_t i, const size_t j) const {
-    return values[j * 4 + i];
-  };
+    return values[i * 4 + j];
+  }
 };

@@ -48,19 +48,16 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
 {
      VsOutput o;
 
-   
-     float4 worldPos = mul(transform.transform_matrix, float4(in.position, 1.0));
-     float4 viewPos = mul(cam_data.view_mat, worldPos);
-     o.pos = mul(cam_data.proj_mat, viewPos);
+     o.pos = mul(cam_data.proj_mat, mul(cam_data.view_mat, mul(transform.transform_matrix, float4(in.position, 1.0))));
 
-    o.col[1] = cam_data.proj_mat[0][0];
+    
 
    
     return o;
 }
 
 [shader("fragment")]
-float4 pixelMain(VsOutput in)
+float4 pixelMain(VsOutput in) : SV_Target
 {
     return float4(1.0, 0.0, 0.0, 1.0);
 }
