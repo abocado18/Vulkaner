@@ -276,8 +276,8 @@ void PipelineBuilder2::makeGraphicsDefault() {
   builder.rasterization_info.depthClampEnable = VK_FALSE;
   builder.rasterization_info.rasterizerDiscardEnable = VK_FALSE;
   builder.rasterization_info.polygonMode = VK_POLYGON_MODE_FILL;
-  builder.rasterization_info.cullMode = VK_CULL_MODE_NONE;
-  builder.rasterization_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
+  builder.rasterization_info.cullMode = VK_CULL_MODE_BACK_BIT;
+  builder.rasterization_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   builder.rasterization_info.depthBiasEnable = VK_FALSE;
   builder.rasterization_info.depthBiasSlopeFactor = 1.0f;
   builder.rasterization_info.lineWidth = 1.0f;

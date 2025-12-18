@@ -84,9 +84,19 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
 
   PipelineBuilder2 builder{};
   builder.makeGraphicsDefault();
-  builder.depth_stencil_info.depthTestEnable = VK_FALSE;
-  builder.depth_stencil_info.depthBoundsTestEnable = VK_FALSE;
-  builder.depth_stencil_info.stencilTestEnable = VK_FALSE;
+  builder.rendering_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+  builder.rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+
+  std::vector<VkFormat> gbuffer_pipeline_formats = {
+    VK_FORMAT_R8G8B8A8_UNORM,
+    VK_FORMAT_R16G16_SFLOAT,
+    VK_FORMAT_R8G8B8A8_UNORM,
+
+  };
+
+  builder.rendering_info.colorAttachmentCount = gbuffer_pipeline_formats.size();
+  builder.rendering_info.pColorAttachmentFormats = gbuffer_pipeline_formats.data();
 
   _pipeline_manager->createGraphicsPipeline(
       builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",
@@ -629,10 +639,12 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
 #pragma region Start Drawing
 
-  constexpr TransientImageKey draw_key = {
+  constexpr VkExtent3D g_buffer_extent = {1280, 720, 1};
 
-      VK_FORMAT_R16G16B16A16_SFLOAT,
-      {1920, 1080, 1},
+  constexpr TransientImageKey albedo_key = {
+
+      VK_FORMAT_R8G8B8A8_UNORM,
+      g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
@@ -643,10 +655,61 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   };
 
-  _resource_manager->registerTransientImage("Draw", draw_key);
+  constexpr TransientImageKey normal_key = {
 
-  Image _draw_image = _resource_manager->getTransientImage(
-      "Draw", _frame_number % FRAMES_IN_FLIGHT);
+      VK_FORMAT_R16G16_SFLOAT,
+      g_buffer_extent,
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      1,
+      1
+
+  };
+
+  constexpr TransientImageKey metallic_roughness_ao_key = {
+
+      VK_FORMAT_R8G8B8A8_UNORM,
+      g_buffer_extent,
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      1,
+      1
+
+  };
+
+  constexpr TransientImageKey depth_key = {
+      VK_FORMAT_D32_SFLOAT,
+      {1920, 1080, 1},
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+          VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_DEPTH_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      1,
+      1};
+
+  _resource_manager->registerTransientImage("Albedo", albedo_key);
+  _resource_manager->registerTransientImage("Depth", depth_key);
+  _resource_manager->registerTransientImage("Normal", normal_key);
+  _resource_manager->registerTransientImage("MRAO", metallic_roughness_ao_key);
+
+  Image _albedo_image = _resource_manager->getTransientImage(
+      "Albedo", _frame_number % FRAMES_IN_FLIGHT);
+
+  Image _depth_image = _resource_manager->getTransientImage(
+      "Depth", _frame_number % FRAMES_IN_FLIGHT);
+
+  Image _normal_image = _resource_manager->getTransientImage(
+      "Normal", _frame_number % FRAMES_IN_FLIGHT);
+
+  Image _mrao_image = _resource_manager->getTransientImage(
+      "MRAO", _frame_number % FRAMES_IN_FLIGHT);
 
   {
     VkCommandBufferBeginInfo begin_info = {};
@@ -657,40 +720,52 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
              "Start Command Buffer");
   }
 
-  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
-                                      VK_IMAGE_LAYOUT_GENERAL);
-
-  {
-    VkClearColorValue clear_value = {};
-
-    clear_value = {{0.0f, 1.0f, 1.0f, 1.0f}};
-
-    VkImageSubresourceRange range =
-        vk_utils::getImageSubResourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
-
-    vkCmdClearColorImage(graphics_command_buffer, _draw_image.image,
-                         VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &range);
-  }
-
-  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
+  _resource_manager->transistionImage(graphics_command_buffer, _albedo_image,
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-  auto color_info = vk_utils::attachmentInfo(
-      _draw_image.view, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  _resource_manager->transistionImage(graphics_command_buffer, _normal_image,
+                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  _resource_manager->transistionImage(graphics_command_buffer, _mrao_image,
+                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  _resource_manager->transistionImage(graphics_command_buffer, _depth_image,
+                                      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+
+
+  VkClearValue color_clear_value{};
+  color_clear_value.color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+  VkClearValue depth_clear_value{};
+  depth_clear_value.depthStencil.depth = 1.0f;
+
+  VkRenderingAttachmentInfo g_buffer_info[] = {
+
+      vk_utils::attachmentInfo(_albedo_image.view, &color_clear_value,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
+      vk_utils::attachmentInfo(_normal_image.view, &color_clear_value,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
+      vk_utils::attachmentInfo(_mrao_image.view, &color_clear_value,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
+
+  };
+
+  auto depth_info =
+      vk_utils::attachmentInfo(_depth_image.view, &depth_clear_value,
+                               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
   auto render_info = vk_utils::renderingInfo(
-      &color_info, 1, {_draw_image.extent.width, _draw_image.extent.height},
-      {0, 0}, VK_NULL_HANDLE, VK_NULL_HANDLE);
+      g_buffer_info, 3, {g_buffer_extent.width, g_buffer_extent.height}, {0, 0},
+      &depth_info, VK_NULL_HANDLE);
+
   vkCmdBeginRendering(graphics_command_buffer, &render_info);
 
-  VkViewport viewport = {0,
-                         0,
-                         (float)_draw_image.extent.width,
-                         (float)_draw_image.extent.height,
-                         0.0f,
-                         1.0f};
+  VkViewport viewport = {
+      0,    0,   (float)g_buffer_extent.width, (float)g_buffer_extent.height,
+      0.0f, 1.0f};
 
-  VkRect2D scissor = {0, 0, _draw_image.extent.width,
-                      _draw_image.extent.height};
+  VkRect2D scissor = {0, 0, g_buffer_extent.width, g_buffer_extent.height};
 
   vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
@@ -744,7 +819,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   vkCmdEndRendering(graphics_command_buffer);
 
-  _resource_manager->transistionImage(graphics_command_buffer, _draw_image,
+  _resource_manager->transistionImage(graphics_command_buffer, _albedo_image,
                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -752,9 +827,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
                              _swapchain_images[swapchain_image_index]);
 
   vk_utils::copyImageToImage(
-      graphics_command_buffer, _draw_image.image,
+      graphics_command_buffer, _albedo_image.image,
       _swapchain_images[swapchain_image_index],
-      {_draw_image.extent.width, _draw_image.extent.height}, _swapchain_extent);
+      {_albedo_image.extent.width, _albedo_image.extent.height}, _swapchain_extent);
 
   vk_utils::transistionImage(graphics_command_buffer,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
