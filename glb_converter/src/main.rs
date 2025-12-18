@@ -24,9 +24,10 @@ struct Entity {
 struct Vertex {
     position: [f32; 3],
     _pad0: u32,
-    normal: [f32; 3],
+    color: [f32; 3],
     _pad1: u32,
-    color: [f32; 4],
+    normals: [f32; 3],
+    _pad2 : u32,
     uv: [f32; 4],
 }
 
@@ -111,15 +112,16 @@ fn process_meshes(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
                 let v: Vertex = Vertex {
                     position: *position.get(i).unwrap_or(&[0.0, 0.0, 0.0]),
                     _pad0: 0,
-                    normal: *normals.get(i).unwrap_or(&[0.0, 0.0, 0.0]),
+                    normals: *normals.get(i).unwrap_or(&[0.0, 0.0, 0.0]),
                     _pad1: 0,
-                    color: *color.get(i).unwrap_or(&[1.0, 1.0, 1.0, 1.0]),
+                    color: color.get(i).map(|c|[c[0], c[1], c[2]]).unwrap_or([1.0, 1.0, 1.0]),
                     uv: [
                         uv0.get(i).unwrap_or(&[0.0, 0.0])[0],
                         uv0.get(i).unwrap_or(&[0.0, 0.0])[1],
                         uv1.get(i).unwrap_or(&[0.0, 0.0])[0],
                         uv1.get(i).unwrap_or(&[0.0, 0.0])[1],
                     ],
+                    _pad2: 0,
                 };
 
                 vertices.push(v);
