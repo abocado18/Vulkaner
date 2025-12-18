@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 bytemuck = { version = "1.24.0", features = ["derive"] }
+cgmath = "0.18.0"
 fs = "0.0.5"
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual", "extras", "names"] }
 image = "0.25.9"

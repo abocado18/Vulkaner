@@ -7,6 +7,8 @@ use std::vec;
 use anyhow::Ok;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
+use cgmath::InnerSpace;
+use cgmath::num_traits::NumAssignOps;
 use gltf::image::Source;
 use serde::Deserialize;
 use serde::Serialize;
@@ -27,7 +29,8 @@ struct Vertex {
     color: [f32; 3],
     _pad1: u32,
     normals: [f32; 3],
-    _pad2 : u32,
+    _pad2: u32,
+    tangent: [f32; 4],
     uv: [f32; 4],
 }
 
@@ -114,7 +117,10 @@ fn process_meshes(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
                     _pad0: 0,
                     normals: *normals.get(i).unwrap_or(&[0.0, 0.0, 0.0]),
                     _pad1: 0,
-                    color: color.get(i).map(|c|[c[0], c[1], c[2]]).unwrap_or([1.0, 1.0, 1.0]),
+                    color: color
+                        .get(i)
+                        .map(|c| [c[0], c[1], c[2]])
+                        .unwrap_or([1.0, 1.0, 1.0]),
                     uv: [
                         uv0.get(i).unwrap_or(&[0.0, 0.0])[0],
                         uv0.get(i).unwrap_or(&[0.0, 0.0])[1],
@@ -122,9 +128,117 @@ fn process_meshes(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
                         uv1.get(i).unwrap_or(&[0.0, 0.0])[1],
                     ],
                     _pad2: 0,
+                    tangent: [0.0, 0.0, 0.0, 0.0],
                 };
 
                 vertices.push(v);
+            }
+
+            let mut tangents: Vec<[f32; 3]> = Vec::default();
+            tangents.resize(vertices.len(), [0.0, 0.0, 0.0]);
+            let mut bitangents: Vec<[f32; 3]> = Vec::default();
+            bitangents.resize(vertices.len(), [0.0, 0.0, 0.0]);
+
+            let mut triangles_included = vec![0; vertices.len()];
+
+            for c in indices.chunks(3) {
+                let v0 = vertices[c[0] as usize];
+                let v1 = vertices[c[1] as usize];
+                let v2 = vertices[c[2] as usize];
+
+                let pos0: cgmath::Vector3<_> = v0.position.into();
+                let pos1: cgmath::Vector3<_> = v1.position.into();
+                let pos2: cgmath::Vector3<_> = v2.position.into();
+
+                let uv0: cgmath::Vector2<_> = cgmath::Vector2 {
+                    x: v0.uv[0],
+                    y: v0.uv[1],
+                };
+                let uv1: cgmath::Vector2<_> = cgmath::Vector2 {
+                    x: v1.uv[0],
+                    y: v1.uv[1],
+                };
+                let uv2: cgmath::Vector2<_> = cgmath::Vector2 {
+                    x: v2.uv[0],
+                    y: v2.uv[1],
+                };
+
+                let delta_pos1 = pos1 - pos0;
+                let delta_pos2 = pos2 - pos0;
+
+                let delta_uv1 = uv1 - uv0;
+                let delta_uv2 = uv2 - uv0;
+
+                let denom = delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x;
+                if denom.abs() < 1e-8 {
+                    continue;
+                }
+                let r = 1.0 / denom;
+
+                let tangent = (delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r;
+
+                let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
+
+                tangents[c[0] as usize] =
+                    (tangent + cgmath::Vector3::from(tangents[c[0] as usize])).into();
+                tangents[c[1] as usize] =
+                    (tangent + cgmath::Vector3::from(tangents[c[1] as usize])).into();
+                tangents[c[2] as usize] =
+                    (tangent + cgmath::Vector3::from(tangents[c[2] as usize])).into();
+
+                bitangents[c[0] as usize] =
+                    (bitangent + cgmath::Vector3::from(bitangents[c[0] as usize])).into();
+
+                bitangents[c[1] as usize] =
+                    (bitangent + cgmath::Vector3::from(bitangents[c[1] as usize])).into();
+
+                bitangents[c[2] as usize] =
+                    (bitangent + cgmath::Vector3::from(bitangents[c[2] as usize])).into();
+
+                // Used to average the tangents/bitangents
+                triangles_included[c[0] as usize] += 1;
+                triangles_included[c[1] as usize] += 1;
+                triangles_included[c[2] as usize] += 1;
+            }
+
+            for (i, n) in triangles_included.into_iter().enumerate() {
+                let denom = 1.0 / n as f32;
+                tangents[i] = (cgmath::Vector3::from(tangents[i]) * denom).into();
+                bitangents[i] = (cgmath::Vector3::from(bitangents[i]) * denom).into();
+            }
+
+            for i in 0..vertices.len() {
+                let v: &mut Vertex = vertices.get_mut(i).unwrap();
+
+                let mut vec_tangent: cgmath::Vector3<f32> = tangents[i].into();
+                let vec_bitangent: cgmath::Vector3<f32> = bitangents[i].into();
+                let mut vec_normal: cgmath::Vector3<f32> = v.normals.into();
+                vec_normal = vec_normal.normalize();
+
+                vec_tangent =
+                    vec_tangent - vec_normal * cgmath::Vector3::dot(vec_normal, vec_tangent);
+
+                if vec_tangent.magnitude2() < 1e-8 {
+                    vec_tangent = cgmath::Vector3::unit_x();
+                } else {
+                    vec_tangent = vec_tangent.normalize();
+                }
+
+                v.tangent[0] = vec_tangent[0];
+                v.tangent[1] = vec_tangent[1];
+                v.tangent[2] = vec_tangent[2];
+
+                if cgmath::dot(
+                    cgmath::Vector3::cross(vec_normal, vec_tangent),
+                    vec_bitangent,
+                ) < 0.0
+                {
+                    v.tangent[3] = -1.0;
+                } else {
+                    v.tangent[3] = 1.0;
+                }
+
+                v.normals = vec_normal.into();
             }
 
             let mut bytes: Vec<u8> = vec![];
@@ -208,8 +322,6 @@ fn process_node(node: &gltf::Node, entity_to_node: &mut HashMap<usize, u32>) -> 
     }
 
     if let Some(light) = node.light() {
-
-
         let light_json = match light.kind() {
             gltf::khr_lights_punctual::Kind::Directional => {
                 serde_json::json!({
@@ -217,30 +329,31 @@ fn process_node(node: &gltf::Node, entity_to_node: &mut HashMap<usize, u32>) -> 
                     "color" : light.color(),
                     "intensity" : light.intensity(),
                 })
-            },
+            }
             gltf::khr_lights_punctual::Kind::Point => {
                 serde_json::json!({
-                    "type" : "Point",
-                    "color" : light.color(),
-                    "intensity" : light.intensity(),
-                    "range" : light.range(),
-            })
-            },
-            gltf::khr_lights_punctual::Kind::Spot { inner_cone_angle, outer_cone_angle } => {
+                        "type" : "Point",
+                        "color" : light.color(),
+                        "intensity" : light.intensity(),
+                        "range" : light.range(),
+                })
+            }
+            gltf::khr_lights_punctual::Kind::Spot {
+                inner_cone_angle,
+                outer_cone_angle,
+            } => {
                 serde_json::json!({
-                    "type" : "Spot",
-                    "color" : light.color(),
-                    "intensity" : light.intensity(),
-                    "range" : light.range(),
-                    "inner_angle" : inner_cone_angle,
-                    "outer_angle" : outer_cone_angle,
-            })
-            },
+                        "type" : "Spot",
+                        "color" : light.color(),
+                        "intensity" : light.intensity(),
+                        "range" : light.range(),
+                        "inner_angle" : inner_cone_angle,
+                        "outer_angle" : outer_cone_angle,
+                })
+            }
         };
 
         entity.components.insert("Light".to_string(), light_json);
-
-
     }
 
     if let Some(extra) = node.extras() {
