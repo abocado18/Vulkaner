@@ -87,16 +87,22 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
   builder.rendering_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
   builder.rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
-
   std::vector<VkFormat> gbuffer_pipeline_formats = {
-    VK_FORMAT_R8G8B8A8_UNORM,
-    VK_FORMAT_R16G16_SFLOAT,
-    VK_FORMAT_R8G8B8A8_UNORM,
+      VK_FORMAT_R8G8B8A8_UNORM,
+      VK_FORMAT_R8G8B8A8_UNORM,
+      VK_FORMAT_R8G8B8A8_UNORM,
 
   };
 
   builder.rendering_info.colorAttachmentCount = gbuffer_pipeline_formats.size();
-  builder.rendering_info.pColorAttachmentFormats = gbuffer_pipeline_formats.data();
+  builder.rendering_info.pColorAttachmentFormats =
+      gbuffer_pipeline_formats.data();
+
+  auto default_col_attachment = builder.color_blend_attachments[0];
+  builder.color_blend_attachments.push_back(default_col_attachment);
+  builder.color_blend_attachments.push_back(default_col_attachment);
+
+  assert(builder.color_blend_attachments.size() == 3);
 
   _pipeline_manager->createGraphicsPipeline(
       builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",
@@ -657,7 +663,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   constexpr TransientImageKey normal_key = {
 
-      VK_FORMAT_R16G16_SFLOAT,
+      VK_FORMAT_R8G8B8A8_UNORM,
       g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -685,7 +691,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   constexpr TransientImageKey depth_key = {
       VK_FORMAT_D32_SFLOAT,
-      {1920, 1080, 1},
+      g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
           VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
@@ -731,8 +737,6 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   _resource_manager->transistionImage(graphics_command_buffer, _depth_image,
                                       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-
 
   VkClearValue color_clear_value{};
   color_clear_value.color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -829,7 +833,8 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   vk_utils::copyImageToImage(
       graphics_command_buffer, _albedo_image.image,
       _swapchain_images[swapchain_image_index],
-      {_albedo_image.extent.width, _albedo_image.extent.height}, _swapchain_extent);
+      {_albedo_image.extent.width, _albedo_image.extent.height},
+      _swapchain_extent);
 
   vk_utils::transistionImage(graphics_command_buffer,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,

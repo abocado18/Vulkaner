@@ -13,6 +13,7 @@ struct BufferIdAndOffset {
 struct GpuCameraData {
   Mat4<float> proj_matrix;
   Mat4<float> view_matrix;
+  Mat4<float> inv_view_matrix;
 };
 
 struct RenderCamera {

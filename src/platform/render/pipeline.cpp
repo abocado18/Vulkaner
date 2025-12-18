@@ -42,8 +42,6 @@ PipelineManager::PipelineManager(const std::string path, VkDevice &device)
 
   slang::SessionDesc session_desc = {};
 
-
-
   slang::TargetDesc target_desc = {};
   target_desc.format = SLANG_SPIRV;
   target_desc.profile = _global_session->findProfile("spirv_1_5");
@@ -287,26 +285,32 @@ void PipelineBuilder2::makeGraphicsDefault() {
   builder.multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   builder.multisample_info.sampleShadingEnable = VK_FALSE;
 
-  builder.color_blend_attachment.colorWriteMask =
+  builder.color_blend_attachments.resize(1);
+
+  builder.color_blend_attachments[0].colorWriteMask =
       VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-  builder.color_blend_attachment.blendEnable = VK_TRUE;
-  builder.color_blend_attachment.srcColorBlendFactor =
+  builder.color_blend_attachments[0].blendEnable = VK_TRUE;
+  builder.color_blend_attachments[0].srcColorBlendFactor =
       VK_BLEND_FACTOR_SRC_ALPHA;
-  builder.color_blend_attachment.dstColorBlendFactor =
+  builder.color_blend_attachments[0].dstColorBlendFactor =
       VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-  builder.color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-  builder.color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-  builder.color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-  builder.color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+  builder.color_blend_attachments[0].colorBlendOp = VK_BLEND_OP_ADD;
+  builder.color_blend_attachments[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  builder.color_blend_attachments[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+  builder.color_blend_attachments[0].alphaBlendOp = VK_BLEND_OP_ADD;
 
   builder.color_blend_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
   builder.color_blend_info.logicOpEnable = VK_FALSE;
   builder.color_blend_info.logicOp = VK_LOGIC_OP_COPY;
-  builder.color_blend_info.attachmentCount = 1;
-  builder.color_blend_info.pAttachments = &builder.color_blend_attachment;
+
+  // Set in creat graphics pipeline func
+  // builder.color_blend_info.attachmentCount =
+  // builder.color_blend_attachments.size();
+  // builder.color_blend_info.pAttachments =
+  // builder.color_blend_attachments.data();
 
   builder.color_rendering_formats = {VK_FORMAT_R16G16B16A16_SFLOAT};
 
@@ -334,6 +338,12 @@ void PipelineBuilder2::makeGraphicsDefault() {
 size_t PipelineManager::createGraphicsPipeline(
     PipelineBuilder2 pipeline_builder,
     std::array<std::string, 4> shader_modules_name_and_entry_point) {
+
+  // Update some builder data
+  pipeline_builder.color_blend_info.attachmentCount =
+      pipeline_builder.color_blend_attachments.size();
+  pipeline_builder.color_blend_info.pAttachments =
+      pipeline_builder.color_blend_attachments.data();
 
   std::vector<uint32_t> vertex_spv_data{};
   std::vector<uint32_t> frag_spv_data{};

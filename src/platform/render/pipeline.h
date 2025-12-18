@@ -39,12 +39,12 @@ public:
   VkPipelineViewportStateCreateInfo viewport_info{};
   VkPipelineRasterizationStateCreateInfo rasterization_info{};
   VkPipelineMultisampleStateCreateInfo multisample_info{};
-  VkPipelineColorBlendAttachmentState color_blend_attachment{};
+  std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments{};
   VkPipelineColorBlendStateCreateInfo color_blend_info{};
 
   VkPipelineDepthStencilStateCreateInfo depth_stencil_info{};
 
-  std::array<VkVertexInputAttributeDescription, 5> vertex_attribute_desc;
+  std::array<VkVertexInputAttributeDescription, 6> vertex_attribute_desc;
   std::array<VkVertexInputBindingDescription, 1> vertex_binding_desc;
 
   std::vector<VkDynamicState> dynamic_states{};

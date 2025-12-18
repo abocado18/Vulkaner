@@ -4,8 +4,6 @@
     "children": [],
     "parent": -1,
     "components": {
-      "Mesh": 0,
-      "Name": "Cube",
       "Transform": {
         "rotation": [
           0.0,
@@ -23,7 +21,9 @@
           0.0,
           0.0
         ]
-      }
+      },
+      "Mesh": 0,
+      "Name": "Cube"
     }
   },
   {
@@ -38,7 +38,6 @@
         "zfar": 1000.0,
         "znear": 0.10000000149011612
       },
-      "Name": "Camera",
       "Transform": {
         "rotation": [
           -0.23911748826503754,
@@ -56,7 +55,8 @@
           13.865961074829102,
           16.98227882385254
         ]
-      }
+      },
+      "Name": "Camera"
     }
   },
   {
