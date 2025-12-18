@@ -40,17 +40,20 @@ ConstantBuffer<Transform> transform;
 struct VsOutput
 {
     float4 pos : SV_Position;
-    float3 col;
-};
+
+ 
+}
+    
 
 [shader("vertex")]
 VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
 {
      VsOutput o;
 
+
      o.pos = mul(cam_data.proj_mat, mul(cam_data.view_mat, mul(transform.transform_matrix, float4(in.position, 1.0))));
 
-    
+  
 
    
     return o;
@@ -59,5 +62,5 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
 [shader("fragment")]
 float4 pixelMain(VsOutput in) : SV_Target
 {
-    return float4(1.0, 0.0, 0.0, 1.0);
+    return float4(0.0, 0.0, 1.0, 1.0);
 }

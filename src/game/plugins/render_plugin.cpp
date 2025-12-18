@@ -163,7 +163,7 @@ void RenderPlugin::build(game::Game &game) {
             camera_data.proj_matrix = Mat4<float>::perspective(
                 cam.fov, cam.aspct_ratio, cam.z_near, cam.z_far);
 
-                camera_data.proj_matrix = camera_data.proj_matrix.transpose();
+              
 
             break;
           case CameraType::ORTHOGRAPHIC:
@@ -175,13 +175,17 @@ void RenderPlugin::build(game::Game &game) {
           }
 
           Vec3<float> forward_vector =
-              transform.rotation * Vec3<float>(0.0f, 0.0f, -1.0f);
+              Vec3<float>::forward(); //(0, 0, -1)
+          forward_vector = transform.rotation * forward_vector;
+
+
+              
 
           camera_data.view_matrix = Mat4<float>::lookAt(
               transform.translation, Vec3<float>(0.0f, 1.0f, 0.0f),
               transform.translation + forward_vector);
 
-              camera_data.view_matrix = camera_data.view_matrix.transpose();
+            
 
           gpu_cam.camera_mat_handle = renderer->writeBuffer(
               transform_buffer_handle, &camera_data, sizeof(camera_data),
@@ -207,7 +211,7 @@ void RenderPlugin::build(game::Game &game) {
           Mat4<float> transform_matrix = Mat4<float>::createTransformMatrix(
               t.translation, t.scale, t.rotation);
 
-              transform_matrix = transform_matrix.transpose();
+         
 
           gpu_transform.transform_handle = renderer->writeBuffer(
               transform_buffer, &transform_matrix, sizeof(transform_matrix),

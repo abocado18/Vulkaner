@@ -8,9 +8,9 @@
 
 template <typename T> struct AssetHandle {
 
-  AssetHandle<T>() : id(SIZE_MAX), ptr(nullptr) {}
+  AssetHandle() : id(SIZE_MAX), ptr(nullptr) {}
 
-  AssetHandle<T>(size_t id, std::shared_ptr<T> ptr) : id(id), ptr(ptr) {}
+  AssetHandle(size_t id, std::shared_ptr<T> ptr) : id(id), ptr(ptr) {}
 
   size_t id;
 

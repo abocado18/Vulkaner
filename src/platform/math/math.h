@@ -154,10 +154,12 @@ template <typename T> struct Quat {
   Quat<T> conjugate() const { return Quat<T>{-x, -y, -z, w}; }
 
   Quat<T> operator*(const Quat<T> &rhs) const {
-    return Quat<T>{w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z,
-                   w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y,
-                   w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x,
-                   w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w};
+    return Quat<T>{
+        w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y, 
+        w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x, 
+        w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w, 
+        w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z  
+    };
   }
 };
 
@@ -351,13 +353,12 @@ template <typename T> struct Mat4 {
     Mat4<T> proj = Mat4<T>::identity();
 
     proj(0, 0) = e / aspect;
-    proj(1, 1) = e;
+    proj(1, 1) = -e;
 
     proj(2, 2) = far_plane / (far_plane - near_plane);
     proj(2, 3) = -(far_plane * near_plane) / (far_plane - near_plane);
 
-
-    proj(3, 2) = -1;
+    proj(3, 2) = 1;
     proj(3, 3) = 0;
 
     return proj;
@@ -382,28 +383,32 @@ template <typename T> struct Mat4 {
   static Mat4<T> lookAt(const Vec3<T> &eye, const Vec3<T> &up,
                         const Vec3<T> &center) {
 
-    Vec3<T> z_axis = (eye - center);
-    z_axis = z_axis.normalized();
+    Vec3<T> forward_axis = (center - eye).normalized();
+ 
 
-    Vec3<T> x_axis = up.cross(z_axis);
-    x_axis = x_axis.normalized();
+    Vec3<T> right_axis = forward_axis.cross(up).normalized();
 
-    Vec3<T> y_axis = z_axis.cross(x_axis);
+    Vec3<T> up_axis = right_axis.cross(forward_axis).normalized();
+
+    Vec3<T> translation;
+    translation.x = eye.dot(right_axis);
+    translation.y = eye.dot(up_axis);
+    translation.z = eye.dot(forward_axis);
 
     Mat4<T> view = Mat4<T>::identity();
 
-    view(0, 0) = x_axis.x;
-    view(0, 1) = x_axis.y;
-    view(0, 2) = x_axis.z;
-    view(0, 3) = -x_axis.dot(eye);
-    view(1, 0) = y_axis.x;
-    view(1, 1) = y_axis.y;
-    view(1, 2) = y_axis.z;
-    view(1, 3) = -y_axis.dot(eye);
-    view(2, 0) = z_axis.x;
-    view(2, 1) = z_axis.y;
-    view(2, 2) = z_axis.z;
-    view(2, 3) = -z_axis.dot(eye);
+    view(0, 0) = right_axis.x;
+    view(0, 1) = right_axis.y;
+    view(0, 2) = right_axis.z;
+    view(0, 3) = -translation.x;
+    view(1, 0) = up_axis.x;
+    view(1, 1) = up_axis.y;
+    view(1, 2) = up_axis.z;
+    view(1, 3) = -translation.y;
+    view(2, 0) = forward_axis.x;
+    view(2, 1) = forward_axis.y;
+    view(2, 2) = forward_axis.z;
+    view(2, 3) = -translation.z;
     view(3, 0) = 0;
     view(3, 1) = 0;
     view(3, 2) = 0;

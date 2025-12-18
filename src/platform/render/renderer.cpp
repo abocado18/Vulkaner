@@ -85,6 +85,8 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
   PipelineBuilder2 builder{};
   builder.makeGraphicsDefault();
   builder.depth_stencil_info.depthTestEnable = VK_FALSE;
+  builder.depth_stencil_info.depthBoundsTestEnable = VK_FALSE;
+  builder.depth_stencil_info.stencilTestEnable = VK_FALSE;
 
   _pipeline_manager->createGraphicsPipeline(
       builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",

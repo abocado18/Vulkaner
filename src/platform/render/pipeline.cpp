@@ -42,7 +42,7 @@ PipelineManager::PipelineManager(const std::string path, VkDevice &device)
 
   slang::SessionDesc session_desc = {};
 
-  session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
+
 
   slang::TargetDesc target_desc = {};
   target_desc.format = SLANG_SPIRV;
