@@ -21,6 +21,16 @@ struct Entity {
     components: HashMap<String, serde_json::Value>,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct Material {
+    id: u32,
+    albedo: [f32; 4],
+    roughness: f32,
+    metallic: f32,
+    ao: f32,
+    lighting_model: String, //Gets converted to correct id when loading
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
@@ -65,6 +75,8 @@ fn main() -> anyhow::Result<()> {
 
     process_scene(&file);
 
+    process_materials(&file, &buffers);
+
     process_meshes(&file, &buffers);
 
     process_images(&file, &images);
@@ -72,11 +84,46 @@ fn main() -> anyhow::Result<()> {
     return Ok(());
 }
 
+fn process_materials(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
+    for m in scene.materials() {
+        let mut mat: Material = Material::default();
+
+        mat.id = m.index().unwrap() as u32;
+        mat.albedo = m.pbr_metallic_roughness().base_color_factor();
+        mat.metallic = m.pbr_metallic_roughness().metallic_factor();
+        mat.roughness = m.pbr_metallic_roughness().roughness_factor();
+
+        if let Some(extra) = m.extras() {
+            mat.lighting_model = extra.to_string();
+        } else {
+            mat.lighting_model = "Pbr".to_string();
+        }
+
+        let _ = std::fs::create_dir_all("scene/materials");
+        let file_path = "scene/materials/".to_string() + &mat.id.to_string() + &".json".to_string();
+        let _ = std::fs::write(file_path, serde_json::to_string_pretty(&mat).unwrap());
+    }
+}
+
 fn process_meshes(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
     for mesh in scene.meshes() {
+        let mut mesh_bin_data: Vec<u8> = Vec::default();
+
+        let mut submesh_index_offset: Vec<u32> = Vec::default();
+        submesh_index_offset.resize(mesh.primitives().len(), 0);
+        let mut submesh_range: Vec<[u32; 2]> = Vec::default();
+        submesh_range.resize(mesh.primitives().len(), [0, 0]);
+
+        let mut number_indices : Vec<u32> = Vec::default();
+        number_indices.resize(mesh.primitives().len(), 0);
+
         let mesh_index = mesh.index();
 
-        for primitive in mesh.primitives() {
+        let primitive_vec: Vec<gltf::Primitive> = mesh.primitives().collect();
+
+        for i in 0..mesh.primitives().len() {
+            let primitive = &primitive_vec[i];
+
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
             let position: Vec<[f32; 3]> = reader
@@ -247,20 +294,34 @@ fn process_meshes(scene: &gltf::Document, buffers: &Vec<gltf::buffer::Data>) {
             bytes.extend_from_slice(bytemuck::cast_slice(&indices));
 
             let index_byte_offset = vertices.len() * size_of::<Vertex>();
-            let number_of_vertices = vertices.len();
-            let number_of_indices = indices.len();
+            let total_offset = index_byte_offset + indices.len() * size_of::<u32>();
+            number_indices[i] = indices.len() as u32;
 
-            let mesh_info = serde_json::json!({"Index Byte Offset": index_byte_offset, "Vertex Number" : number_of_vertices, "Index Number": number_of_indices});
 
-            let _ = std::fs::create_dir_all("scene/meshes");
-            let file_path =
-                "scene/meshes/".to_string() + &mesh_index.to_string() + &".json".to_string();
-            let bin_path =
-                "scene/meshes/".to_string() + &mesh_index.to_string() + &".bin".to_string();
-            let _ = std::fs::write(file_path, serde_json::to_string_pretty(&mesh_info).unwrap());
+            if i == 0 {
+                submesh_range[i] = [0, total_offset as u32];
 
-            let _ = std::fs::write(bin_path, bytemuck::cast_slice(&bytes));
+                submesh_index_offset[i] = index_byte_offset as u32;
+            }
+            else {
+                submesh_range[i] = [submesh_range[i - 1][1], (submesh_range[i - 1][1] + total_offset as u32)];
+
+                submesh_index_offset[i] = submesh_index_offset[i - 1] + (index_byte_offset as u32);
+            }
+
+            mesh_bin_data.extend_from_slice(bytemuck::cast_slice(&vertices));
+            mesh_bin_data.extend_from_slice(bytemuck::cast_slice(&indices));
         }
+
+        let mesh_info = serde_json::json!({"Submesh Ranges": submesh_range, "Index Offsets" : submesh_index_offset, "Index Number": number_indices});
+
+        let _ = std::fs::create_dir_all("scene/meshes");
+        let file_path =
+            "scene/meshes/".to_string() + &mesh_index.to_string() + &".json".to_string();
+        let bin_path = "scene/meshes/".to_string() + &mesh_index.to_string() + &".bin".to_string();
+        let _ = std::fs::write(file_path, serde_json::to_string_pretty(&mesh_info).unwrap());
+
+        let _ = std::fs::write(bin_path, bytemuck::cast_slice(&mesh_bin_data));
     }
 }
 
