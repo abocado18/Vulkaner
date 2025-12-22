@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sys/types.h>
 #include <utility>
 #include <variant>
@@ -632,17 +633,13 @@ ResourceHandle ResourceManager::createImage(
     std::array<uint32_t, 3> extent, VkImageType image_type,
     VkFormat image_format, VkImageUsageFlags image_usage,
     VkImageViewType view_type, VkImageAspectFlags aspect_mask,
-    bool create_mipmaps, uint32_t array_layers) {
+    uint32_t number_mipmaps, uint32_t array_layers) {
 
   VkImageCreateInfo create_info = {};
   create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   create_info.imageType = image_type;
   create_info.extent = {extent[0], extent[1], extent[2]};
-  create_info.mipLevels =
-      create_mipmaps ? static_cast<uint32_t>(std::floor(
-                           std::log2(std::max(extent[0], extent[1])))) +
-                           1
-                     : 1;
+  create_info.mipLevels = number_mipmaps;
 
   create_info.arrayLayers = array_layers;
   create_info.format = image_format;
@@ -694,6 +691,7 @@ ResourceHandle ResourceManager::createImage(
 
 void ResourceManager::writeImage(ResourceHandle handle, void *data,
                                  uint32_t size, std::array<uint32_t, 3> offset,
+                                 std::span<size_t> mip_lvl_offsets,
                                  VkImageLayout new_layout) {
 
   auto weak_ref = resources.at(handle.idx);
@@ -736,6 +734,12 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
   ResourceWriteInfo write_info(resources.at(handle.idx).lock()->value, offset,
                                staging_buffer);
   write_info.image_write_data.new_layout = new_layout;
+  write_info.image_write_data.mip_lvl_offsets.reserve(mip_lvl_offsets.size());
+
+  for (auto &o : mip_lvl_offsets) {
+    write_info.image_write_data.mip_lvl_offsets.push_back(
+        static_cast<uint32_t>(o));
+  }
 
   writes.push_back(write_info);
 }
@@ -886,11 +890,14 @@ void ResourceManager::resetAllTransientImages(const uint32_t frame) {
 
 void ResourceManager::transistionImage(VkCommandBuffer cmd, Image &image,
                                        VkImageLayout new_layout,
+                                       uint32_t mip_levels,
+                                       uint32_t array_layers,
                                        uint32_t old_family_queue,
                                        uint32_t new_family_queue) {
 
   vk_utils::transistionImage(cmd, image.current_layout, new_layout, image.image,
-                             old_family_queue, new_family_queue);
+                             mip_levels, array_layers, old_family_queue,
+                             new_family_queue);
 
   image.current_layout = new_layout;
 }

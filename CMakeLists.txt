@@ -27,6 +27,8 @@ add_subdirectory(deps/vk-bootstrap)
 
 add_subdirectory(deps/SPIRV-Cross)
 
+add_subdirectory(deps/ktx/lib ktx)
+
 #Volk for loading vulkan pointers
 
 if(WIN32)
@@ -92,7 +94,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE deps/assimp/include)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR}/deps/assimp/include)
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap imgui nlohmann_json::nlohmann_json spirv-cross-core)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES} glfw volk vk-bootstrap::vk-bootstrap ktx imgui nlohmann_json::nlohmann_json spirv-cross-core)
 
 
 add_compile_definitions(VULKAN_USE_VALIDATION_LAYERS)

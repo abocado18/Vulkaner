@@ -5,12 +5,14 @@
 
 void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
                                 VkImageLayout current_layout,
-                                VkImageLayout new_layout, VkImage image,
+                                VkImageLayout new_layout, VkImage image, uint32_t mip_levels, uint32_t array_layers,
                                 uint32_t src_queue_family,
                                 uint32_t dst_queue_family) {
 
   VkImageMemoryBarrier2 image_barrier = {};
   image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+
+  
 
   image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   image_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
@@ -35,7 +37,7 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
           : VK_IMAGE_ASPECT_COLOR_BIT;
 
   image_barrier.subresourceRange =
-      vk_utils::getImageSubResourceRange(aspect_mask);
+      vk_utils::getImageSubResourceRange(aspect_mask, mip_levels, array_layers);
 
   image_barrier.image = image;
 
@@ -73,14 +75,14 @@ void vk_utils::transistionBuffer(VkCommandBuffer command_buffer,
 }
 
 VkImageSubresourceRange
-vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask) {
+vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask, uint32_t mip_levels, uint32_t array_layers) {
   VkImageSubresourceRange range = {};
   range.aspectMask = aspect_mask;
   range.baseMipLevel = 0;
   range.baseArrayLayer = 0;
 
-  range.levelCount = 1;
-  range.layerCount = 1;
+  range.levelCount = mip_levels;
+  range.layerCount = array_layers;
 
   return range;
 }

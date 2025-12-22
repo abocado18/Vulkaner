@@ -218,19 +218,20 @@ template <> struct hash<CombinedResourceIndexAndDescriptorType> {
 
 struct ResourceWriteInfo {
 
-  ResourceWriteInfo(const std::variant<Image, Buffer> _target,
+  ResourceWriteInfo(std::variant<Image, Buffer> _target,
                     const std::array<uint32_t, 3> _offset,
                     const Buffer _source_buffer)
       : target(_target), target_offset(_offset), source_buffer(_source_buffer),
-        image_write_data({VK_IMAGE_LAYOUT_UNDEFINED}) {}
+        image_write_data({VK_IMAGE_LAYOUT_UNDEFINED, {}}) {}
 
-  const std::variant<Image, Buffer> target;
+  std::variant<Image, Buffer> target;
   const std::array<uint32_t, 3> target_offset;
 
   const Buffer source_buffer;
 
   struct ImageWriteData {
     VkImageLayout new_layout;
+    std::vector<uint32_t> mip_lvl_offsets{};
   } image_write_data;
 
   struct BufferWriteData {
@@ -310,14 +311,16 @@ public:
                              VkImageUsageFlags image_usage,
                              VkImageViewType view_type,
                              VkImageAspectFlags aspect_mask,
-                             bool create_mipmaps, uint32_t array_layers);
+                             uint32_t number_mipmaps, uint32_t array_layers);
 
   void writeImage(ResourceHandle handle, void *data, uint32_t size,
                   std::array<uint32_t, 3> offset = {0, 0, 0},
+                  std::span<size_t> mip_lvl_offsets = {},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
 
   void transistionImage(VkCommandBuffer cmd, Image &image,
-                        VkImageLayout new_layout,
+                        VkImageLayout new_layout, uint32_t mip_levels = 1,
+                        uint32_t array_layers = 1,
                         uint32_t old_family_queue = UINT32_MAX,
                         uint32_t new_family_queue = UINT32_MAX);
 
@@ -332,9 +335,10 @@ public:
   void removeResource(size_t idx) { resources.erase(idx); }
 
   Descriptor bindResources(
-      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind, VkDescriptorSetLayout _layout);
+      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind,
+      VkDescriptorSetLayout _layout);
 
-  const std::vector<ResourceWriteInfo> &getWrites() const { return writes; }
+  std::vector<ResourceWriteInfo> &getWrites() { return writes; }
 
   void clearWrites() { writes.clear(); }
 

@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <span>
+#include <sys/types.h>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -16,6 +18,8 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
+
+
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -66,11 +70,11 @@ public:
   createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
               VkFormat image_format, VkImageUsageFlags image_usage,
               VkImageViewType view_type, VkImageAspectFlags aspect_mask,
-              bool create_mipmaps, uint32_t array_layers) = 0;
+              uint32_t number_mipmaps, uint32_t array_layers) = 0;
 
   virtual void
   writeImage(ResourceHandle handle, void *data, uint32_t size,
-             std::array<uint32_t, 3> offset = {0, 0, 0},
+             std::array<uint32_t, 3> offset = {0, 0, 0}, std::span<size_t> image_mip_level_offsets = {},
              VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) = 0;
 
   virtual bool shouldRun() = 0;
@@ -100,10 +104,10 @@ public:
   createImage(std::array<uint32_t, 3> extent, VkImageType image_type,
               VkFormat image_format, VkImageUsageFlags image_usage,
               VkImageViewType view_type, VkImageAspectFlags aspect_mask,
-              bool create_mipmaps, uint32_t array_layers) override;
+              uint32_t number_mipmaps, uint32_t array_layers) override;
 
   void writeImage(ResourceHandle handle, void *data, uint32_t size,
-                  std::array<uint32_t, 3> offset = {0, 0, 0},
+                  std::array<uint32_t, 3> offset = {0, 0, 0}, std::span<size_t> mip_lvl_offsets = {},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) override;
 
 private:

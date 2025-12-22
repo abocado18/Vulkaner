@@ -558,11 +558,11 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     VK_CHECK(vkBeginCommandBuffer(transfer_command_buffer, &begin_info),
              "Start Command Buffer");
 
-    for (const auto &w : _resource_manager->getWrites()) {
+    for (auto &w : _resource_manager->getWrites()) {
 
       if (std::holds_alternative<Buffer>(w.target)) {
 
-        const Buffer &target_buffer = std::get<Buffer>(w.target);
+        Buffer &target_buffer = std::get<Buffer>(w.target);
 
         VkBufferCopy region = {};
         region.srcOffset = 0;
@@ -584,30 +584,39 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
       } else {
 
-        const Image &img = std::get<Image>(w.target);
+        Image &img = std::get<Image>(w.target);
 
-        VkBufferImageCopy region = {};
-        region.bufferOffset = 0;
-        region.imageExtent = img.extent;
-        region.imageOffset = {static_cast<int32_t>(w.target_offset[0]),
-                              static_cast<int32_t>(w.target_offset[1]),
-                              static_cast<int32_t>(w.target_offset[2])};
-        region.imageSubresource.aspectMask = img.aspect_mask;
-        region.imageSubresource.baseArrayLayer = 0;
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.layerCount = 1;
+        _resource_manager->transistionImage(
+            transfer_command_buffer, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            w.image_write_data.mip_lvl_offsets.size(), 1);
 
-        vk_utils::transistionImage(
-            transfer_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, img.image);
+        for (size_t i = 0; i < w.image_write_data.mip_lvl_offsets.size(); i++) {
 
-        vkCmdCopyBufferToImage(transfer_command_buffer, w.source_buffer.buffer,
-                               img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               1, &region);
+          uint32_t offset = w.image_write_data.mip_lvl_offsets[i];
 
-        vk_utils::transistionImage(
-            transfer_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            w.image_write_data.new_layout, img.image,
+          uint32_t width = std::max(1u, img.extent.width >> i);
+          uint32_t height = std::max(1u, img.extent.height >> i);
+          uint32_t depth = std::max(1u, img.extent.depth >> i);
+
+          VkBufferImageCopy region = {};
+          region.bufferOffset = offset;
+          region.imageExtent = {width, height, depth};
+          region.imageOffset = {static_cast<int32_t>(w.target_offset[0]),
+                                static_cast<int32_t>(w.target_offset[1]),
+                                static_cast<int32_t>(w.target_offset[2])};
+          region.imageSubresource.aspectMask = img.aspect_mask;
+          region.imageSubresource.baseArrayLayer = 0;
+          region.imageSubresource.mipLevel = i;
+          region.imageSubresource.layerCount = 1;
+
+          vkCmdCopyBufferToImage(
+              transfer_command_buffer, w.source_buffer.buffer, img.image,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+
+        _resource_manager->transistionImage(
+            transfer_command_buffer, img, w.image_write_data.new_layout,
+            w.image_write_data.mip_lvl_offsets.size(), 1,
             _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
             _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
       }
@@ -1010,16 +1019,18 @@ ResourceHandle VulkanRenderer::createImage(
     std::array<uint32_t, 3> extent, VkImageType image_type,
     VkFormat image_format, VkImageUsageFlags image_usage,
     VkImageViewType view_type, VkImageAspectFlags aspect_mask,
-    bool create_mipmaps, uint32_t array_layers) {
+    uint32_t number_mipmaps, uint32_t array_layers) {
 
   return _resource_manager->createImage(extent, image_type, image_format,
                                         image_usage, view_type, aspect_mask,
-                                        create_mipmaps, array_layers);
+                                        number_mipmaps, array_layers);
 }
 
 void VulkanRenderer::writeImage(ResourceHandle handle, void *data,
                                 uint32_t size, std::array<uint32_t, 3> offset,
+                                std::span<size_t> mip_lvl_offsets,
                                 VkImageLayout new_layout) {
 
-  _resource_manager->writeImage(handle, data, size, offset, new_layout);
+  _resource_manager->writeImage(handle, data, size, offset, mip_lvl_offsets,
+                                new_layout);
 }
