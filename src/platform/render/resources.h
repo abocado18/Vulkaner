@@ -2,6 +2,8 @@
 
 #include "allocator/vk_mem_alloc.h"
 #include "platform/render/deletion_queue.h"
+#include "platform/render/render_object.h"
+#include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "volk.h"
 #include <array>
@@ -112,7 +114,7 @@ struct Buffer {
   VmaAllocationInfo allocation_info;
   uint32_t size;
   uint32_t current_offset = 0;
-  std::vector<std::array<uint32_t, 2>> free_spaces = {};
+  std::vector<std::array<uint32_t, 2>> free_spaces{};
 
   VkBufferUsageFlags usage_flags;
 };
@@ -218,20 +220,20 @@ template <> struct hash<CombinedResourceIndexAndDescriptorType> {
 
 struct ResourceWriteInfo {
 
-  ResourceWriteInfo(std::variant<Image, Buffer> _target,
-                    const std::array<uint32_t, 3> _offset,
+  ResourceWriteInfo(uint32_t _target, const std::array<uint32_t, 3> _offset,
                     const Buffer _source_buffer)
-      : target(_target), target_offset(_offset), source_buffer(_source_buffer),
+      : target_index(_target), target_offset(_offset),
+        source_buffer(_source_buffer),
         image_write_data({VK_IMAGE_LAYOUT_UNDEFINED, {}}) {}
 
-  std::variant<Image, Buffer> target;
+  uint32_t target_index{};
   const std::array<uint32_t, 3> target_offset;
 
   const Buffer source_buffer;
 
   struct ImageWriteData {
     VkImageLayout new_layout;
-    std::vector<uint32_t> mip_lvl_offsets{};
+    std::vector<MipMapData> mip_lvl_data{};
   } image_write_data;
 
   struct BufferWriteData {
@@ -315,14 +317,8 @@ public:
 
   void writeImage(ResourceHandle handle, void *data, uint32_t size,
                   std::array<uint32_t, 3> offset = {0, 0, 0},
-                  std::span<size_t> mip_lvl_offsets = {},
+                  std::span<MipMapData> mipmap_data = {},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL);
-
-  void transistionImage(VkCommandBuffer cmd, Image &image,
-                        VkImageLayout new_layout, uint32_t mip_levels = 1,
-                        uint32_t array_layers = 1,
-                        uint32_t old_family_queue = UINT32_MAX,
-                        uint32_t new_family_queue = UINT32_MAX);
 
   const Image &getImage(size_t idx);
   const Buffer &getBuffer(size_t idx);
@@ -338,20 +334,50 @@ public:
       std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind,
       VkDescriptorSetLayout _layout);
 
-  std::vector<ResourceWriteInfo> &getWrites() { return writes; }
+  std::span<ResourceWriteInfo> getWrites() { return writes; }
 
   void clearWrites() { writes.clear(); }
 
   void registerTransientImage(const std::string &name,
                               const TransientImageKey &key);
 
+  void transistionTransientImage(const std::string &name, const uint32_t frame,
+                                 VkCommandBuffer cmd, VkImageLayout new_layout);
+
   void resetAllTransientImages(const uint32_t frame);
 
   Image getTransientImage(const std::string &name, const uint32_t frame);
 
+  inline const ResourceHandle getPlaceholderImageHandle() const noexcept {
+    return placeholder_image_handle;
+  }
+
+  void transistionResourceImage(VkCommandBuffer cmd, size_t resource_idx,
+                                VkImageLayout new_layout,
+                                uint32_t mip_levels = 1,
+                                uint32_t array_layers = 1,
+                                uint32_t old_family_queue = UINT32_MAX,
+                                uint32_t new_family_queue = UINT32_MAX);
+
+  void transistionResourceBuffer(VkCommandBuffer cmd, size_t resource_idx,
+                                 VkAccessFlags old_access,
+                                 VkAccessFlags new_access,
+                                 uint32_t src_queue_family = UINT32_MAX,
+                                 uint32_t dst_queue_family = UINT32_MAX);
+
+  void commitWrite(VkCommandBuffer cmd, ResourceWriteInfo &write_info,
+                   uint32_t old_family_index, uint32_t new_family_index);
+
+  void commitWriteTransmit(VkCommandBuffer cmd, ResourceWriteInfo &write_info,
+                   uint32_t old_family_index, uint32_t new_family_index);
+
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources{};
   std::unordered_map<std::string, size_t> resource_names{};
+
+  ResourceHandle placeholder_image_handle;
+
+  VkSampler default_sampler; // Fallback sampler
 
   // Caches created transient resources based on resource data
 

@@ -19,8 +19,6 @@
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 
-
-
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -74,10 +72,14 @@ public:
 
   virtual void
   writeImage(ResourceHandle handle, void *data, uint32_t size,
-             std::array<uint32_t, 3> offset = {0, 0, 0}, std::span<size_t> image_mip_level_offsets = {},
+             std::array<uint32_t, 3> offset = {0, 0, 0},
+             std::span<MipMapData> mipmap_data = {},
              VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) = 0;
 
   virtual bool shouldRun() = 0;
+
+  // Returns handle to a white image as placeholder when no image is used
+  virtual ResourceHandle getPlaceholderImageHandle() = 0;
 };
 
 class VulkanRenderer : public IRenderer {
@@ -90,7 +92,7 @@ public:
   }
 
   void draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
-                    std::vector<RenderLight> &lights) override;
+            std::vector<RenderLight> &lights) override;
 
   ResourceHandle createBuffer(size_t size,
                               VkBufferUsageFlags usage_flags) override;
@@ -107,8 +109,13 @@ public:
               uint32_t number_mipmaps, uint32_t array_layers) override;
 
   void writeImage(ResourceHandle handle, void *data, uint32_t size,
-                  std::array<uint32_t, 3> offset = {0, 0, 0}, std::span<size_t> mip_lvl_offsets = {},
+                  std::array<uint32_t, 3> offset = {0, 0, 0},
+                  std::span<MipMapData> mipmap_data = {},
                   VkImageLayout new_layout = VK_IMAGE_LAYOUT_GENERAL) override;
+
+  ResourceHandle getPlaceholderImageHandle() override {
+    return _resource_manager->getPlaceholderImageHandle();
+  }
 
 private:
   VkInstance _instance;

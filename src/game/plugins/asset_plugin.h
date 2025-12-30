@@ -36,13 +36,26 @@ public:
   AssetHandle<T> registerAsset(const T &data, const std::string &asset_path) {
 
     size_t id = pathToAssetId(asset_path);
-    std::shared_ptr<T> ptr = std::make_shared<T>(data);
+    auto it = data_map.find(id);
 
-    AssetHandle<T> handle(id, ptr);
+    if (it == data_map.end()) {
 
-    data_map[id] = ptr;
+      std::shared_ptr<T> ptr = std::make_shared<T>(data);
+      data_map[id] = ptr;
+      return AssetHandle<T>(id, ptr);
+    } else {
 
-    return handle;
+      std::shared_ptr<T> ptr = it->second.lock();
+      if (!ptr) {
+
+        ptr = std::make_shared<T>(data);
+        data_map[id] = ptr;
+      } else {
+        *ptr = data;
+      }
+  
+      return AssetHandle<T>(id, ptr);
+    }
   }
 
   AssetHandle<T> getAssetHandle(const std::string &asset_path) {
@@ -64,12 +77,12 @@ public:
   bool isPathRegistered(const std::string &path) {
     auto it = path_to_id.find(path);
 
-    if(it == path_to_id.end())
+    if (it == path_to_id.end())
       return false;
 
     std::weak_ptr<T> find_asset = data_map.at(it->second);
 
-    if(find_asset.expired())
+    if (find_asset.expired())
       return false;
 
     return true;

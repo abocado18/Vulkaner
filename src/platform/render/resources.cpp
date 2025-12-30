@@ -1,6 +1,8 @@
 #include "resources.h"
+#include "platform/render/render_object.h"
 #include "vulkan_macros.h"
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -8,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <sys/types.h>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -227,25 +230,36 @@ Resource::Resource(std::variant<Image, Buffer> v, ResourceManager *manager,
 
 Resource::~Resource() {
 
-  if (std::holds_alternative<Image>(value)) {
+  std::visit(
+      [&](auto &v) {
+        using T = std::decay_t<decltype(v)>;
 
-    Image img = std::get<Image>(value);
+        if constexpr (std::is_same_v<T, Buffer>) {
 
-    resource_manager->_deletion_queue.pushFunction(
-        [img](ResourceManager *manager) {
-          vkDestroyImageView(manager->_device, img.view, nullptr);
+          auto buffer_copy = v;
 
-          vmaDestroyImage(manager->_allocator, img.image, img.allocation);
-        });
-  } else {
+          this->resource_manager->_deletion_queue.pushFunction(
+              [buffer_copy](ResourceManager *manager) {
+                vmaDestroyBuffer(manager->_allocator, buffer_copy.buffer,
+                                 buffer_copy.allocation);
+              });
 
-    Buffer buffer = std::get<Buffer>(value);
-    resource_manager->_deletion_queue.pushFunction(
-        [buffer](ResourceManager *manager) {
-          vmaDestroyBuffer(manager->_allocator, buffer.buffer,
-                           buffer.allocation);
-        });
-  }
+        }
+
+        else if constexpr (std::is_same_v<T, Image>) {
+
+          auto image_copy = v;
+
+          this->resource_manager->_deletion_queue.pushFunction(
+              [image_copy](ResourceManager *manager) {
+                vkDestroyImageView(manager->_device, image_copy.view, nullptr);
+
+                vmaDestroyImage(manager->_allocator, image_copy.image,
+                                image_copy.allocation);
+              });
+        }
+      },
+      this->value);
 
   resource_manager->removeResource(idx);
 }
@@ -282,9 +296,49 @@ ResourceManager::ResourceManager(VkDevice &device, VkPhysicalDevice _gpu,
   _dynamic_allocator.init(_device, 50, ratios);
 
   vkGetPhysicalDeviceProperties(_gpu, &_properties);
+
+  //
+
+  // In ResourceManager Konstruktor nach _device Init
+  VkSamplerCreateInfo sampler_info{};
+  sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sampler_info.magFilter = VK_FILTER_LINEAR;
+  sampler_info.minFilter = VK_FILTER_LINEAR;
+  sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.anisotropyEnable = VK_TRUE;
+  sampler_info.maxAnisotropy = 16.0f;
+  sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+  sampler_info.unnormalizedCoordinates = VK_FALSE;
+  sampler_info.compareEnable = VK_FALSE;
+  sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+  VK_ERROR(vkCreateSampler(_device, &sampler_info, nullptr, &default_sampler),
+           "Create default sampler");
+
+  // Create Placeholder Image Resource
+
+  this->placeholder_image_handle = this->createImage(
+      {1, 1, 1}, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
+
+  assert(placeholder_image_handle.idx == 0);
+
+  std::array<uint8_t, 4> tex_data = {255, 255, 255, 255};
+  std::array<MipMapData, 1> mipmap_data = {{sizeof(tex_data), 0}};
+
+  this->writeImage(placeholder_image_handle, &tex_data, sizeof(tex_data),
+                   {0, 0, 0}, mipmap_data,
+                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 ResourceManager::~ResourceManager() {
+
+  runDeletionQueue();
+
+  vkDestroySampler(_device, default_sampler, nullptr);
 
   _dynamic_allocator.destroyPools(_device);
 
@@ -444,7 +498,7 @@ Descriptor ResourceManager::bindResources(
 
       Image &img = std::get<Image>(r->value);
 
-      writer.writeImage(i, img.view, VK_NULL_HANDLE, img.current_layout,
+      writer.writeImage(i, img.view, default_sampler, img.current_layout,
                         searched_types[i]);
 
     } else {
@@ -573,8 +627,7 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
     return {};
   }
 
-  ResourceWriteInfo info(resources.at(handle.idx).lock()->value,
-                         {allocated_offset}, staging_buffer);
+  ResourceWriteInfo info(handle.idx, {allocated_offset}, staging_buffer);
 
   info.buffer_write_data = {new_access};
 
@@ -691,25 +744,26 @@ ResourceHandle ResourceManager::createImage(
 
 void ResourceManager::writeImage(ResourceHandle handle, void *data,
                                  uint32_t size, std::array<uint32_t, 3> offset,
-                                 std::span<size_t> mip_lvl_offsets,
+                                 std::span<MipMapData> mipmap_data,
                                  VkImageLayout new_layout) {
 
-  auto weak_ref = resources.at(handle.idx);
+  {
 
-  if (weak_ref.expired()) {
-    std::cout << "Resource does not exist anymore\n";
-    return;
+    auto weak_ref = resources.at(handle.idx);
+
+    if (weak_ref.expired()) {
+      std::cout << "Resource does not exist anymore\n";
+      return;
+    }
+
+    Resource &ref = *weak_ref.lock().get();
+
+    if (std::holds_alternative<Image>(ref.value) == false) {
+      std::cout << "Resource is not am Image\n";
+
+      return;
+    }
   }
-
-  Resource &ref = *weak_ref.lock().get();
-
-  if (std::holds_alternative<Image>(ref.value) == false) {
-    std::cout << "Resource is not am Image\n";
-
-    return;
-  }
-
-  Image &img_ref = std::get<Image>(ref.value);
 
   Buffer staging_buffer;
 
@@ -731,14 +785,12 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
 
   std::memcpy(staging_buffer.allocation_info.pMappedData, data, size);
 
-  ResourceWriteInfo write_info(resources.at(handle.idx).lock()->value, offset,
-                               staging_buffer);
+  ResourceWriteInfo write_info(handle.idx, offset, staging_buffer);
   write_info.image_write_data.new_layout = new_layout;
-  write_info.image_write_data.mip_lvl_offsets.reserve(mip_lvl_offsets.size());
+  write_info.image_write_data.mip_lvl_data.reserve(mipmap_data.size());
 
-  for (auto &o : mip_lvl_offsets) {
-    write_info.image_write_data.mip_lvl_offsets.push_back(
-        static_cast<uint32_t>(o));
+  for (auto &m : mipmap_data) {
+    write_info.image_write_data.mip_lvl_data.push_back(m);
   }
 
   writes.push_back(write_info);
@@ -888,16 +940,213 @@ void ResourceManager::resetAllTransientImages(const uint32_t frame) {
   cache.used_transient_images.clear();
 }
 
-void ResourceManager::transistionImage(VkCommandBuffer cmd, Image &image,
-                                       VkImageLayout new_layout,
-                                       uint32_t mip_levels,
-                                       uint32_t array_layers,
-                                       uint32_t old_family_queue,
-                                       uint32_t new_family_queue) {
+void ResourceManager::transistionResourceImage(
+    VkCommandBuffer cmd, size_t resource_idx, VkImageLayout new_layout,
+    uint32_t mip_levels, uint32_t array_layers, uint32_t old_family_queue,
+    uint32_t new_family_queue) {
 
-  vk_utils::transistionImage(cmd, image.current_layout, new_layout, image.image,
-                             mip_levels, array_layers, old_family_queue,
-                             new_family_queue);
+  auto *r = this->resources[resource_idx].lock().get();
 
-  image.current_layout = new_layout;
+  if (!r) {
+    return;
+  }
+
+  std::visit(
+      [&](auto &value) {
+        using T = std::decay_t<decltype(value)>;
+
+        if constexpr (std::is_same_v<T, Image>) {
+
+          vk_utils::transistionImage(cmd, value.current_layout, new_layout,
+                                     value.image, mip_levels, array_layers,
+                                     old_family_queue, new_family_queue);
+
+          value.current_layout = new_layout;
+        }
+
+        else if constexpr (std::is_same_v<T, Buffer>) {
+
+          std::cerr << "Resourcs is not image\n";
+          return;
+        }
+      },
+      r->value);
+}
+
+void ResourceManager::transistionResourceBuffer(VkCommandBuffer cmd,
+                                                size_t resource_idx,
+                                                VkAccessFlags old_access,
+                                                VkAccessFlags new_access,
+                                                uint32_t src_queue_family,
+                                                uint32_t dst_queue_family) {
+
+  auto *r = this->resources[resource_idx].lock().get();
+
+  if (!r) {
+    return;
+  }
+
+  std::visit(
+      [&](auto &value) {
+        using T = std::decay_t<decltype(value)>;
+
+        if constexpr (std::is_same_v<T, Buffer>) {
+
+          vk_utils::transistionBuffer(cmd, old_access, new_access, value.buffer,
+                                      src_queue_family, dst_queue_family);
+
+        }
+
+        else if constexpr (std::is_same_v<T, Image>) {
+
+          std::cerr << "Resourcs is not buffer\n";
+          return;
+        }
+      },
+      r->value);
+}
+
+void ResourceManager::commitWriteTransmit(VkCommandBuffer cmd,
+                                          ResourceWriteInfo &write_info,
+                                          uint32_t old_family_index,
+                                          uint32_t new_family_index) {
+
+  auto weak_r = this->resources.at(write_info.target_index);
+
+  if (weak_r.expired()) {
+    return;
+  }
+
+  Resource *ref = weak_r.lock().get();
+
+  std::visit(
+      [&](auto &value) {
+        using T = std::decay_t<decltype(value)>;
+
+        if constexpr (std::is_same_v<T, Image>) {
+
+          bool queue_family_transfer = old_family_index != new_family_index;
+
+          this->transistionResourceImage(
+              cmd, write_info.target_index,
+              write_info.image_write_data.new_layout,
+              write_info.image_write_data.mip_lvl_data.size(), 1,
+              queue_family_transfer ? old_family_index : UINT32_MAX,
+              queue_family_transfer ? new_family_index : UINT32_MAX);
+        }
+
+        else if constexpr (std::is_same_v<T, Buffer>) {
+
+          bool queue_family_transfer = old_family_index != new_family_index;
+
+          this->transistionResourceBuffer(
+              cmd, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
+              write_info.buffer_write_data.new_access,
+              queue_family_transfer ? old_family_index : UINT32_MAX,
+              queue_family_transfer ? new_family_index : UINT32_MAX);
+        }
+      },
+      ref->value);
+}
+
+void ResourceManager::commitWrite(VkCommandBuffer cmd,
+                                  ResourceWriteInfo &write_info,
+                                  uint32_t old_family_index,
+                                  uint32_t new_family_index) {
+
+  auto weak_r = this->resources.at(write_info.target_index);
+
+  if (weak_r.expired()) {
+    return;
+  }
+
+  Resource *ref = weak_r.lock().get();
+
+  std::visit(
+      [&](auto &value) {
+        using T = std::decay_t<decltype(value)>;
+
+        if constexpr (std::is_same_v<T, Image>) {
+
+          this->transistionResourceImage(
+              cmd, write_info.target_index,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              write_info.image_write_data.mip_lvl_data.size(), 1);
+
+          for (size_t i = 0;
+               i < write_info.image_write_data.mip_lvl_data.size(); i++) {
+
+            uint64_t offset =
+                write_info.image_write_data.mip_lvl_data[i].offset;
+
+            uint32_t width = std::max(1u, value.extent.width >> i);
+            uint32_t height = std::max(1u, value.extent.height >> i);
+            uint32_t depth = std::max(1u, value.extent.depth >> i);
+
+            VkBufferImageCopy region = {};
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.bufferOffset = offset;
+            region.imageExtent = {width, height, depth};
+            region.imageOffset = {
+                static_cast<int32_t>(write_info.target_offset[0]),
+                static_cast<int32_t>(write_info.target_offset[1]),
+                static_cast<int32_t>(write_info.target_offset[2])};
+            region.imageSubresource.aspectMask = value.aspect_mask;
+            region.imageSubresource.baseArrayLayer = 0;
+            region.imageSubresource.mipLevel = i;
+            region.imageSubresource.layerCount = 1;
+
+            vkCmdCopyBufferToImage(
+                cmd, write_info.source_buffer.buffer, value.image,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+          }
+
+
+          bool queue_family_transfer = old_family_index != new_family_index;
+
+          this->transistionResourceImage(
+              cmd, write_info.target_index,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              write_info.image_write_data.mip_lvl_data.size(), 1,
+              queue_family_transfer ? old_family_index : UINT32_MAX,
+              queue_family_transfer ? new_family_index : UINT32_MAX);
+
+        } else if constexpr (std::is_same_v<T, Buffer>) {
+
+          this->transistionResourceBuffer(cmd, write_info.target_index,
+                                          VK_ACCESS_NONE,
+                                          VK_ACCESS_TRANSFER_WRITE_BIT);
+
+          VkBufferCopy region = {};
+          region.srcOffset = 0;
+          region.dstOffset = write_info.target_offset[0];
+          region.size = write_info.source_buffer.size;
+
+          vkCmdCopyBuffer(cmd, write_info.source_buffer.buffer, value.buffer, 1,
+                          &region);
+          bool queue_family_transfer = old_family_index != new_family_index;
+
+          this->transistionResourceBuffer(
+              cmd, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
+              VK_ACCESS_TRANSFER_WRITE_BIT,
+              queue_family_transfer ? old_family_index : UINT32_MAX,
+              queue_family_transfer ? new_family_index : UINT32_MAX);
+        }
+      },
+      ref->value);
+}
+
+void ResourceManager::transistionTransientImage(const std::string &name,
+                                                const uint32_t frame,
+                                                VkCommandBuffer cmd,
+                                                VkImageLayout new_layout) {
+
+  Image &ref =
+      transient_images_cache.at(frame).used_transient_images.at(name).second;
+
+  vk_utils::transistionImage(cmd, ref.current_layout, new_layout, ref.image,
+                             ref.mip_map_number, ref.array_layers);
+
+  ref.current_layout = new_layout;
 }

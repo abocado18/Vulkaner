@@ -1,5 +1,6 @@
 #pragma once
 #include "platform/math/math.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -17,7 +18,7 @@ struct GpuCameraData {
 };
 
 struct RenderCamera {
-  BufferIdAndOffset camera_data {};
+  BufferIdAndOffset camera_data{};
 };
 
 struct RenderMesh {
@@ -28,6 +29,8 @@ struct RenderMesh {
   uint32_t index_offset;
 
   BufferIdAndOffset material{};
+
+  std::vector<uint32_t> images{};
 
   uint32_t pipeline_id;
 };
@@ -49,5 +52,18 @@ struct RenderLight {
   BufferIdAndOffset light{};
 };
 
+struct RenderMaterial {
+  std::array<float, 4> albedo;
+  float metallic;
+  float roughness;
+  std::array<float, 3> emissive;
+  float _pad[3];
+};
 
+static_assert(sizeof(RenderMaterial) % 16 == 0);
 
+// Level is known per index in array
+struct MipMapData {
+  size_t size;
+  size_t offset;
+};

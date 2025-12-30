@@ -148,6 +148,8 @@ VulkanRenderer::~VulkanRenderer() {
 
     _main_deletion_queue.flush();
 
+    vkDeviceWaitIdle(_device);
+
     destroySwapchain();
 
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -202,6 +204,9 @@ bool VulkanRenderer::initVulkan() {
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
+    VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = VK_TRUE;
+
     VkPhysicalDeviceVulkan11Features features11{};
     features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     features11.shaderDrawParameters = VK_TRUE;
@@ -211,6 +216,7 @@ bool VulkanRenderer::initVulkan() {
         selector.set_minimum_version(1, 3)
             .set_required_features_13(features13)
             .set_required_features_11(features11)
+            .set_required_features(features)
             .set_surface(_surface)
 
             .select()
@@ -558,69 +564,16 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     VK_CHECK(vkBeginCommandBuffer(transfer_command_buffer, &begin_info),
              "Start Command Buffer");
 
-    for (auto &w : _resource_manager->getWrites()) {
+    for (size_t write_index = 0;
+         write_index < _resource_manager->getWrites().size(); write_index++) {
 
-      if (std::holds_alternative<Buffer>(w.target)) {
+      ResourceWriteInfo &w = _resource_manager->getWrites()[write_index];
 
-        Buffer &target_buffer = std::get<Buffer>(w.target);
+      _resource_manager->commitWrite(transfer_command_buffer, w,
+                                     _transfer_queue_family,
+                                     _graphics_queue_family);
 
-        VkBufferCopy region = {};
-        region.srcOffset = 0;
-        region.dstOffset = w.target_offset[0];
-        region.size = w.source_buffer.size;
-
-        vk_utils::transistionBuffer(transfer_command_buffer, VK_ACCESS_NONE,
-                                    VK_ACCESS_TRANSFER_WRITE_BIT,
-                                    target_buffer.buffer);
-
-        vkCmdCopyBuffer(transfer_command_buffer, w.source_buffer.buffer,
-                        target_buffer.buffer, 1, &region);
-
-        vk_utils::transistionBuffer(
-            transfer_command_buffer, VK_ACCESS_TRANSFER_WRITE_BIT,
-            w.buffer_write_data.new_access, target_buffer.buffer,
-            _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
-            _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
-
-      } else {
-
-        Image &img = std::get<Image>(w.target);
-
-        _resource_manager->transistionImage(
-            transfer_command_buffer, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            w.image_write_data.mip_lvl_offsets.size(), 1);
-
-        for (size_t i = 0; i < w.image_write_data.mip_lvl_offsets.size(); i++) {
-
-          uint32_t offset = w.image_write_data.mip_lvl_offsets[i];
-
-          uint32_t width = std::max(1u, img.extent.width >> i);
-          uint32_t height = std::max(1u, img.extent.height >> i);
-          uint32_t depth = std::max(1u, img.extent.depth >> i);
-
-          VkBufferImageCopy region = {};
-          region.bufferOffset = offset;
-          region.imageExtent = {width, height, depth};
-          region.imageOffset = {static_cast<int32_t>(w.target_offset[0]),
-                                static_cast<int32_t>(w.target_offset[1]),
-                                static_cast<int32_t>(w.target_offset[2])};
-          region.imageSubresource.aspectMask = img.aspect_mask;
-          region.imageSubresource.baseArrayLayer = 0;
-          region.imageSubresource.mipLevel = i;
-          region.imageSubresource.layerCount = 1;
-
-          vkCmdCopyBufferToImage(
-              transfer_command_buffer, w.source_buffer.buffer, img.image,
-              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        }
-
-        _resource_manager->transistionImage(
-            transfer_command_buffer, img, w.image_write_data.new_layout,
-            w.image_write_data.mip_lvl_offsets.size(), 1,
-            _dedicated_transfer ? _transfer_queue_family : UINT32_MAX,
-            _dedicated_transfer ? _graphics_queue_family : UINT32_MAX);
-      }
-
+      // Queue delete staging buffers and clear writes
       Buffer source_buffer = w.source_buffer;
 
       getCurrentFrame()._deletion_queue.pushFunction([source_buffer, this]() {
@@ -628,9 +581,6 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
                          source_buffer.allocation);
       });
     }
-
-    _resource_manager->_deletion_queue.pushFunction(
-        [](ResourceManager *manager) { manager->clearWrites(); });
 
     vkEndCommandBuffer(transfer_command_buffer);
 
@@ -649,6 +599,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     VK_CHECK(vkQueueSubmit2(_transfer_queue, 1, &submit, 0),
              "Submit Transfer Commands");
   }
+
+  _resource_manager->_deletion_queue.pushFunction(
+      [](ResourceManager *manager) { manager->clearWrites(); });
 
 #pragma endregion
 
@@ -709,22 +662,27 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
       1,
       1};
 
-  _resource_manager->registerTransientImage("Albedo", albedo_key);
-  _resource_manager->registerTransientImage("Depth", depth_key);
-  _resource_manager->registerTransientImage("Normal", normal_key);
-  _resource_manager->registerTransientImage("MRAO", metallic_roughness_ao_key);
+  constexpr const char *GBufferNames[] = {"Albedo", "Depth", "Normal", "MRAO"};
 
-  Image _albedo_image = _resource_manager->getTransientImage(
-      "Albedo", _frame_number % FRAMES_IN_FLIGHT);
+  _resource_manager->registerTransientImage(GBufferNames[0], albedo_key);
+  _resource_manager->registerTransientImage(GBufferNames[1], depth_key);
+  _resource_manager->registerTransientImage(GBufferNames[2], normal_key);
+  _resource_manager->registerTransientImage(GBufferNames[3],
+                                            metallic_roughness_ao_key);
 
-  Image _depth_image = _resource_manager->getTransientImage(
-      "Depth", _frame_number % FRAMES_IN_FLIGHT);
+  const uint32_t current_frame = _frame_number % FRAMES_IN_FLIGHT;
 
-  Image _normal_image = _resource_manager->getTransientImage(
-      "Normal", _frame_number % FRAMES_IN_FLIGHT);
+  Image _albedo_image =
+      _resource_manager->getTransientImage(GBufferNames[0], current_frame);
 
-  Image _mrao_image = _resource_manager->getTransientImage(
-      "MRAO", _frame_number % FRAMES_IN_FLIGHT);
+  Image _depth_image =
+      _resource_manager->getTransientImage(GBufferNames[1], current_frame);
+
+  Image _normal_image =
+      _resource_manager->getTransientImage(GBufferNames[2], current_frame);
+
+  Image _mrao_image =
+      _resource_manager->getTransientImage(GBufferNames[3], current_frame);
 
   {
     VkCommandBufferBeginInfo begin_info = {};
@@ -735,17 +693,33 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
              "Start Command Buffer");
   }
 
-  _resource_manager->transistionImage(graphics_command_buffer, _albedo_image,
-                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  {
+    // Ownership transfer must happen on dst command buffer, so final wrie
+    // barrier happens here
 
-  _resource_manager->transistionImage(graphics_command_buffer, _normal_image,
-                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    for (auto &w : _resource_manager->getWrites()) {
 
-  _resource_manager->transistionImage(graphics_command_buffer, _mrao_image,
-                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      _resource_manager->commitWriteTransmit(graphics_command_buffer, w,
+                                             _transfer_queue_family,
+                                             _graphics_queue_family);
+    }
+  }
 
-  _resource_manager->transistionImage(graphics_command_buffer, _depth_image,
-                                      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+  _resource_manager->transistionTransientImage(
+      GBufferNames[0], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  _resource_manager->transistionTransientImage(
+      GBufferNames[1], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+  _resource_manager->transistionTransientImage(
+      GBufferNames[2], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  _resource_manager->transistionTransientImage(
+      GBufferNames[3], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
   VkClearValue color_clear_value{};
   color_clear_value.color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -794,7 +768,13 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   Descriptor cam_desc = _resource_manager->bindResources(
       cam_resources, p.set_layouts[0]); // Bind to first Descriptor Set
 
+  vkCmdBindDescriptorSets(graphics_command_buffer,
+                          VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1,
+                          &cam_desc.set, 1, &camera.camera_data.offset);
+
   std::vector<CombinedResourceIndexAndDescriptorType> transform_resources(1);
+
+  std::vector<CombinedResourceIndexAndDescriptorType> material_resources(1);
 
   for (auto &m : meshes) {
 
@@ -808,9 +788,40 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
                             VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 1, 1,
                             &transform_desc.set, 1, &m.transform.offset);
 
+    material_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    material_resources[0].idx = m.material.id;
+    material_resources[0].size = sizeof(RenderMaterial);
+
+    size_t img_bind_index = 5; // Img starts at slot 5
+    for (auto &img_index : m.images) {
+
+      if (img_bind_index > 5)
+        continue; // Only bind albedo for now
+
+      auto &img_to_bind = _resource_manager->getImage(img_index);
+
+      std::vector<CombinedResourceIndexAndDescriptorType> img_to_bind_res(1);
+      img_to_bind_res[0].idx = img_index;
+      img_to_bind_res[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      img_to_bind_res[0].size = 0;
+
+      Descriptor image_desc = _resource_manager->bindResources(
+
+          img_to_bind_res, p.set_layouts[img_bind_index]);
+
+      vkCmdBindDescriptorSets(graphics_command_buffer,
+                              VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout,
+                              img_bind_index, 1, &image_desc.set, 0, nullptr);
+
+      img_bind_index++;
+    }
+
+    Descriptor mat_desc =
+        _resource_manager->bindResources(material_resources, p.set_layouts[2]);
+
     vkCmdBindDescriptorSets(graphics_command_buffer,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1,
-                            &cam_desc.set, 1, &camera.camera_data.offset);
+                            VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 2, 1,
+                            &mat_desc.set, 1, &m.material.offset);
 
     auto &vertex_buffer = _resource_manager->getBuffer(m.vertex.id);
 
@@ -832,8 +843,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   vkCmdEndRendering(graphics_command_buffer);
 
-  _resource_manager->transistionImage(graphics_command_buffer, _albedo_image,
-                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  _resource_manager->transistionTransientImage(
+      GBufferNames[0], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
   vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -861,7 +873,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
         getCurrentFrame()._swapchain_semaphore);
 
     VkSemaphoreSubmitInfo wait_transfer_info =
-        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
+        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                       getCurrentFrame()._transfer_semaphore);
 
     VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
@@ -1028,9 +1040,9 @@ ResourceHandle VulkanRenderer::createImage(
 
 void VulkanRenderer::writeImage(ResourceHandle handle, void *data,
                                 uint32_t size, std::array<uint32_t, 3> offset,
-                                std::span<size_t> mip_lvl_offsets,
+                                std::span<MipMapData> mipmap_data,
                                 VkImageLayout new_layout) {
 
-  _resource_manager->writeImage(handle, data, size, offset, mip_lvl_offsets,
+  _resource_manager->writeImage(handle, data, size, offset, mipmap_data,
                                 new_layout);
 }

@@ -22,6 +22,14 @@ struct CamData {
     float4x4 inv_view_mat;
 };
 
+struct MaterialData {
+    float4 albedo;
+    float metallic;
+    float roughness;
+    float3 emissive;
+  
+}
+
 
 struct Transform {
 
@@ -40,12 +48,34 @@ ConstantBuffer<CamData> cam_data;
 ConstantBuffer<Transform> transform;
 
 
+[vk_binding(0, 2)]
+ConstantBuffer<MaterialData> material;
+
+[vk_binding(0, 5)]
+Sampler2D albedo;
+
+[vk_binding(0, 6)]
+Sampler2D normal;
+
+[vk_binding(0, 7)]
+Sampler2D metallic_rougness;
+
+[vk_binding(0, 8)]
+Sampler2D emissive;
+
+
 
 
 struct VsOutput
 {
     float4 pos : SV_Position;
     float3 normal;
+
+
+    float2 tex_coords;
+
+    float metallic;
+    float roughness;
  
 };
 
@@ -68,6 +98,11 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
      float3 world_normal = mul(cam_data.inv_view_mat, float4(in.normals, 1.0)).xyz;
 
     o.normal = world_normal;
+
+    o.tex_coords = in.tex_coords0;
+
+    o.metallic = material.metallic;
+    o.roughness = material.roughness;
    
     return o;
 }
@@ -79,20 +114,23 @@ PsOutput pixelMain(VsOutput in)
     PsOutput o;
 
 
-    float3 world_normal = mul(cam_data.inv_view_mat, float4(in.normal, 1.0)).xyz;
+   
 
-    o.normal = float4(in.normal, 1.0);
-    o.albedo = float4(1.0, 0.0, 0.0, 1.0);
-    o.mrao = float4(0.0, 0.0, 1.0, 1.0);
+
+    float3 albedo_tex_value = albedo.Sample(in.tex_coords).rgb;
+    float3 normal_tex_value = normal.Sample(in.tex_coords).rgb;
+    float3 mr_tex_value = metallic_rougness.Sample(in.tex_coords).rgb;
+
+    
+
+    o.normal = float4(in.normal, 1.0) * float4(normal_tex_value, 1.0);
+    o.albedo = material.albedo * float4(albedo_tex_value, 1.0);
+    o.mrao = float4(mr_tex_value, 1.0);
+    o.mrao.r = in.metallic;
+    o.mrao.g = in.roughness;
 
     return o;
+
+    
 }
 
-
-float2 packNormal ( float3 normal )
-{
-    float2 result;
-    result.xy = normalize ( normal.xy ) * sqrt ( normal.z * 0.5f + 0.5f );
-
-    return result;
-}

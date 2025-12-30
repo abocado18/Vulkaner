@@ -2,7 +2,6 @@
 
 #include "default_components_plugin.h"
 #include "game/game.h"
-#include "game/plugins/camera_plugin.h"
 #include "game/plugins/registry_plugin.h"
 #include <cstdlib>
 #include <iostream>
@@ -13,9 +12,7 @@ void DefaultComponentsPlugin::build(game::Game &game) {
 
   std::cout << "Initialized Default Components\n";
 
-  CameraPlugin camera_plugin{};
 
-  game.addPlugin(camera_plugin);
 
   auto *reg = game.world.getResource<ComponentRegistry>();
 
@@ -24,7 +21,7 @@ void DefaultComponentsPlugin::build(game::Game &game) {
     std::abort();
   }
 
-  reg->registerComponent<Name>("Name");
-  reg->registerComponent<Transform>("Transform");
-  reg->registerComponent<Parent>("Parent");
+  reg->registerComponent<NameComponent>("Name");
+
+  reg->registerComponent<ParentComponent>("Parent");
 }
