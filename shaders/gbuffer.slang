@@ -173,16 +173,21 @@ PsOutput pixelMain(VsOutput in)
         
                 o.mrao.r = metallic;
                 o.mrao.g = roughness;
-                o.mrao.b = mr_tex.r; 
+              
             }
             else
             {
                 o.mrao.r = clamp(in.metallic,  0.0, 1.0);
                 o.mrao.g = clamp(in.roughness, 0.0, 1.0);
-                o.mrao.b = 1.0;
+
+                
+                
             }
-        
+
+            o.mrao.b = 0.0;
             o.mrao.a = 1.0;
+        
+            
    
 
     return o;
