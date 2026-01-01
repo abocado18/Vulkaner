@@ -22,6 +22,18 @@
 
 #include "VkBootstrap.h"
 
+//G Buffers excluding Depth Buffer
+constexpr VkFormat G_BUFFER_FORMATS[] = {
+    VK_FORMAT_R8G8B8A8_UNORM,
+    VK_FORMAT_R8G8_SNORM,
+    VK_FORMAT_R8G8B8A8_UNORM,
+
+};
+
+//G Buffers Count excluding Depth Buffer
+constexpr uint32_t NUMBER_G_BUFFERS =
+    sizeof(G_BUFFER_FORMATS) / sizeof(VkFormat);
+
 #ifdef PRODUCTION_BUILD
 
 constexpr bool useValidationLayers = false;
@@ -87,16 +99,8 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
   builder.rendering_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
   builder.rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
-  std::vector<VkFormat> gbuffer_pipeline_formats = {
-      VK_FORMAT_R8G8B8A8_UNORM,
-      VK_FORMAT_R8G8_SNORM,
-      VK_FORMAT_R8G8B8A8_UNORM,
-
-  };
-
-  builder.rendering_info.colorAttachmentCount = gbuffer_pipeline_formats.size();
-  builder.rendering_info.pColorAttachmentFormats =
-      gbuffer_pipeline_formats.data();
+  builder.rendering_info.colorAttachmentCount = NUMBER_G_BUFFERS;
+  builder.rendering_info.pColorAttachmentFormats = G_BUFFER_FORMATS;
 
   auto default_col_attachment = builder.color_blend_attachments[0];
   builder.color_blend_attachments.push_back(default_col_attachment);
@@ -607,11 +611,12 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
 #pragma region Start Drawing
 
-  const VkExtent3D g_buffer_extent = {draw_image_size[0], draw_image_size[1], 1};
+  const VkExtent3D g_buffer_extent = {draw_image_size[0], draw_image_size[1],
+                                      1};
 
   const TransientImageKey albedo_key = {
 
-      VK_FORMAT_R8G8B8A8_UNORM,
+      G_BUFFER_FORMATS[0],
       g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -625,7 +630,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   const TransientImageKey normal_key = {
 
-      VK_FORMAT_R8G8_SNORM,
+      G_BUFFER_FORMATS[1],
       g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -639,7 +644,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   const TransientImageKey metallic_roughness_ao_key = {
 
-      VK_FORMAT_R8G8B8A8_UNORM,
+      G_BUFFER_FORMATS[2],
       g_buffer_extent,
       VK_IMAGE_TYPE_2D,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -778,7 +783,6 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   for (auto &m : meshes) {
 
-    
     transform_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     transform_resources[0].idx = m.transform.id;
     transform_resources[0].size = sizeof(RenderModelMatrix);
@@ -797,9 +801,8 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     for (auto &img_index : m.images) {
 
       if (img_bind_index > 5)
-        
 
-      auto &img_to_bind = _resource_manager->getImage(img_index);
+        auto &img_to_bind = _resource_manager->getImage(img_index);
 
       std::vector<CombinedResourceIndexAndDescriptorType> img_to_bind_res(1);
       img_to_bind_res[0].idx = img_index;
