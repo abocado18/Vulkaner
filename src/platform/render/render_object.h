@@ -52,12 +52,29 @@ struct RenderLight {
   BufferIdAndOffset light{};
 };
 
+struct RenderModelMatrix {
+
+  Mat4<float> model_matrix;
+  Mat4<float> normal_matrix; // inverse and transposed model for TBN
+};
+
+static_assert(sizeof(RenderModelMatrix) % 16 == 0);
+
+inline RenderModelMatrix createRenderModelMatrix(Mat4<float> &model) {
+
+  RenderModelMatrix r;
+  r.model_matrix = model;
+  r.normal_matrix = model.inverse().transpose();
+
+  return r;
+}
+
 struct RenderMaterial {
-  std::array<float, 4> albedo;
+  alignas(16) std::array<float, 4> albedo;
+  alignas(16) std::array<float, 3> emissive;
   float metallic;
   float roughness;
-  std::array<float, 3> emissive;
-  float _pad[3];
+  alignas(16) std::array<uint32_t, 8> use_textures;
 };
 
 static_assert(sizeof(RenderMaterial) % 16 == 0);

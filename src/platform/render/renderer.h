@@ -165,6 +165,8 @@ private:
 
   size_t _frame_number = 0;
 
+  std::array<uint32_t, 2> draw_image_size {};
+
   inline FrameData &getCurrentFrame() {
 
     return _frames[_frame_number % FRAMES_IN_FLIGHT];

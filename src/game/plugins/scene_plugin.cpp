@@ -196,11 +196,6 @@ void ScenePlugin::build(game::Game &game) {
           asset_material.material_parameters.roughness =
               gltf_m.pbrData.roughnessFactor;
 
-          asset_material.buffer_handle = renderer->writeBuffer(
-              material_buffer_handle, &asset_material.material_parameters,
-              sizeof(asset_material.material_parameters), UINT32_MAX,
-              VK_ACCESS_SHADER_READ_BIT);
-
           auto writeNewImageHandle = [asset_image_data_assets_ptr, renderer](
                                          ktxTexture2 *tex,
                                          AssetImage &new_image,
@@ -416,6 +411,8 @@ void ScenePlugin::build(game::Game &game) {
 
           if (gltf_m.pbrData.baseColorTexture.has_value()) {
 
+            asset_material.material_parameters.use_textures[0] = 1;
+
             auto &tex = asset->textures[gltf_m.pbrData.baseColorTexture.value()
                                             .textureIndex];
 
@@ -433,9 +430,12 @@ void ScenePlugin::build(game::Game &game) {
           } else {
 
             asset_material.images.push_back(placeholder_asset_handle);
+            asset_material.material_parameters.use_textures[0] = 0;
           }
 
           if (gltf_m.normalTexture.has_value()) {
+
+            asset_material.material_parameters.use_textures[1] = 1;
             auto &tex =
                 asset->textures[gltf_m.normalTexture.value().textureIndex];
             assert(tex.basisuImageIndex.has_value());
@@ -447,11 +447,13 @@ void ScenePlugin::build(game::Game &game) {
 
             asset_material.images.push_back(new_handle);
           } else {
-
+            asset_material.material_parameters.use_textures[1] = 0;
             asset_material.images.push_back(placeholder_asset_handle);
           }
 
           if (gltf_m.pbrData.metallicRoughnessTexture.has_value()) {
+
+            asset_material.material_parameters.use_textures[2] = 1;
 
             auto &tex =
                 asset->textures[gltf_m.pbrData.metallicRoughnessTexture.value()
@@ -467,9 +469,14 @@ void ScenePlugin::build(game::Game &game) {
 
             asset_material.images.push_back(new_handle);
           } else {
-
+            asset_material.material_parameters.use_textures[2] = 0;
             asset_material.images.push_back(placeholder_asset_handle);
           }
+
+          asset_material.buffer_handle = renderer->writeBuffer(
+              material_buffer_handle, &asset_material.material_parameters,
+              sizeof(asset_material.material_parameters), UINT32_MAX,
+              VK_ACCESS_SHADER_READ_BIT);
 
           index_to_mat[mat_index] = asset_mat_data_assets_ptr->registerAsset(
               asset_material, std::to_string(mat_index));
@@ -492,101 +499,143 @@ void ScenePlugin::build(game::Game &game) {
 
             std::vector<vertex::Vertex> vertices{};
 
-            std::vector<std::array<float, 3>> vertex_positions{};
-            std::vector<std::array<float, 3>> vertex_normals{};
-            std::vector<std::array<float, 3>> vertex_colors{};
-            std::vector<std::array<float, 2>> vertex_tex_coords_0{};
-
             if (p.indicesAccessor.has_value()) {
-              auto &accessor = asset->accessors[p.indicesAccessor.value()];
 
+              auto &accessor = asset->accessors[p.indicesAccessor.value()];
               indices.resize(accessor.count);
 
-              size_t idx = 0;
+              switch (accessor.componentType) {
 
-              fastgltf::iterateAccessor<uint32_t>(
-                  asset.get(), accessor,
-                  [&](uint32_t index) { indices[idx++] = index; });
+              case fastgltf::ComponentType::UnsignedByte: {
+
+                size_t idx = 0;
+                fastgltf::iterateAccessor<uint8_t>(
+                    asset.get(), accessor, [&](uint8_t index) {
+                      indices[idx++] = static_cast<uint32_t>(index);
+                    });
+
+                break;
+              }
+
+              case fastgltf::ComponentType::UnsignedShort: {
+
+                size_t idx = 0;
+                fastgltf::iterateAccessor<uint16_t>(
+                    asset.get(), accessor, [&](uint16_t index) {
+                      indices[idx++] = static_cast<uint32_t>(index);
+                    });
+
+                break;
+              }
+
+              case fastgltf::ComponentType::UnsignedInt: {
+
+                size_t idx = 0;
+                fastgltf::iterateAccessor<uint32_t>(
+                    asset.get(), accessor,
+                    [&](uint32_t index) { indices[idx++] = index; });
+
+                break;
+              }
+
+              default:
+                break;
+              }
             }
 
             {
+
               auto *it = p.findAttribute(GltfAttrib::Position);
-              auto &accessor = asset->accessors[it->accessorIndex];
 
-              if (!accessor.bufferViewIndex.has_value())
-                continue;
+              if (it && it->accessorIndex < asset->accessors.size()) {
+                auto &accessor = asset->accessors[it->accessorIndex];
 
-              vertex_positions.resize(accessor.count);
+                if (accessor.bufferViewIndex.has_value()) {
+                  vertices.resize(accessor.count);
 
-              fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
-                  asset.get(), accessor,
-                  [&](fastgltf::math::fvec3 pos, size_t idx) {
-                    vertex_positions[idx] = std::array<float, 3>{
-                        pos.data()[0], pos.data()[1], pos.data()[2]};
-                  });
+                  fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+                      asset.get(), accessor,
+                      [&](fastgltf::math::fvec3 pos, size_t idx) {
+                        vertices[idx].position = std::array<float, 3>{
+                            pos.data()[0], pos.data()[1], pos.data()[2]};
+                      });
+                }
+              }
             }
+
+            if (vertices.size() == 0 || indices.size() == 0)
+              continue;
 
             {
               auto *it = p.findAttribute(GltfAttrib::Normal);
-              auto &accessor = asset->accessors[it->accessorIndex];
 
-              if (!accessor.bufferViewIndex.has_value())
-                continue;
+              if (it && it->accessorIndex < asset->accessors.size()) {
+                auto &accessor = asset->accessors[it->accessorIndex];
 
-              vertex_normals.resize(accessor.count);
+                if (accessor.bufferViewIndex.has_value()) {
 
-              fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
-                  asset.get(), accessor,
-                  [&](fastgltf::math::fvec3 n, size_t idx) {
-                    vertex_normals[idx] = std::array<float, 3>{
-                        n.data()[0], n.data()[1], n.data()[2]};
-                  });
+                  fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+                      asset.get(), accessor,
+                      [&](fastgltf::math::fvec3 n, size_t idx) {
+                        vertices[idx].normals = std::array<float, 3>{
+                            n.data()[0], n.data()[1], n.data()[2]};
+                      });
+                }
+              }
+            }
+
+            {
+              auto *it = p.findAttribute(GltfAttrib::Tangent);
+
+              if (it && it->accessorIndex < asset->accessors.size()) {
+                auto &accessor = asset->accessors[it->accessorIndex];
+
+                if (accessor.bufferViewIndex.has_value()) {
+
+                  fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(
+                      asset.get(), accessor,
+                      [&](fastgltf::math::fvec4 t, size_t idx) {
+                        vertices[idx].tangent = std::array<float, 4>{
+                            t.data()[0], t.data()[1], t.data()[2], t.data()[3]};
+                      });
+                }
+              }
             }
 
             {
               auto *it = p.findAttribute(GltfAttrib::Color0);
-              auto &accessor = asset->accessors[it->accessorIndex];
 
-              if (!accessor.bufferViewIndex.has_value())
-                continue;
+              if (it && it->accessorIndex < asset->accessors.size()) {
+                auto &accessor = asset->accessors[it->accessorIndex];
 
-              vertex_colors.resize(accessor.count);
+                if (accessor.bufferViewIndex.has_value()) {
 
-              fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
-                  asset.get(), accessor,
-                  [&](fastgltf::math::fvec3 c, size_t idx) {
-                    vertex_colors[idx] = std::array<float, 3>{
-                        c.data()[0], c.data()[1], c.data()[2]};
-                  });
+                  fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+                      asset.get(), accessor,
+                      [&](fastgltf::math::fvec3 c, size_t idx) {
+                        vertices[idx].color = std::array<float, 3>{
+                            c.data()[0], c.data()[1], c.data()[2]};
+                      });
+                }
+              }
             }
 
             {
               auto *it = p.findAttribute(GltfAttrib::TexCoord0);
-              auto &accessor = asset->accessors[it->accessorIndex];
 
-              if (!accessor.bufferViewIndex.has_value())
-                continue;
+              if (it && it->accessorIndex < asset->accessors.size()) {
+                auto &accessor = asset->accessors[it->accessorIndex];
 
-              vertex_tex_coords_0.resize(accessor.count);
+                if (accessor.bufferViewIndex.has_value()) {
 
-              fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
-                  asset.get(), accessor,
-                  [&](fastgltf::math::fvec2 uv, size_t idx) {
-                    vertex_tex_coords_0[idx] =
-                        std::array<float, 2>{uv.data()[0], uv.data()[1]};
-                  });
-            }
-
-            vertices.resize(vertex_positions.size());
-
-            for (size_t i = 0; i < vertices.size(); i++) {
-
-              auto &v = vertices[i];
-
-              v.position = vertex_positions[i];
-              v.normals = vertex_normals[i];
-              v.color = vertex_colors[i];
-              v.tex_coords_0 = vertex_tex_coords_0[i];
+                  fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
+                      asset.get(), accessor,
+                      [&](fastgltf::math::fvec2 uv, size_t idx) {
+                        vertices[idx].tex_coords_0 =
+                            std::array<float, 2>{uv.data()[0], uv.data()[1]};
+                      });
+                }
+              }
             }
 
             AssetMesh sub_mesh{};

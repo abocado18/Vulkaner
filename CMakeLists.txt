@@ -79,7 +79,7 @@ add_library(imgui
 target_include_directories(imgui PUBLIC
     ${imgui_external_SOURCE_DIR}
     ${imgui_external_SOURCE_DIR}/backends
-   
+
 )
 
 target_include_directories(imgui PUBLIC ${Vulkan_INCLUDE_DIRS})
@@ -131,10 +131,20 @@ endif()
 
 
 
-if(MSVC)
-  #  target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-   # target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
 
+
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Debug build")
+
+else()
+    message(STATUS "Not a Debug build")
+
+    if(MSVC)
+        target_compile_options(${PROJECT_NAME} PRIVATE /O2 /Ob2 /DNDEBUG)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${PROJECT_NAME} PRIVATE -O3 -DNDEBUG)
+
+    endif()
 endif()
 

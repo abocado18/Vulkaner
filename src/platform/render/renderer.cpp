@@ -42,7 +42,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 }
 
 VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
-    : _frame_number(0) {
+    : _frame_number(0), draw_image_size({width, height}) {
 
   _isInitialized = false;
   _resized_requested = false;
@@ -89,7 +89,7 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
 
   std::vector<VkFormat> gbuffer_pipeline_formats = {
       VK_FORMAT_R8G8B8A8_UNORM,
-      VK_FORMAT_R8G8B8A8_UNORM,
+      VK_FORMAT_R8G8_SNORM,
       VK_FORMAT_R8G8B8A8_UNORM,
 
   };
@@ -607,23 +607,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
 #pragma region Start Drawing
 
-  constexpr VkExtent3D g_buffer_extent = {1280, 720, 1};
+  const VkExtent3D g_buffer_extent = {draw_image_size[0], draw_image_size[1], 1};
 
-  constexpr TransientImageKey albedo_key = {
-
-      VK_FORMAT_R8G8B8A8_UNORM,
-      g_buffer_extent,
-      VK_IMAGE_TYPE_2D,
-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-      VK_IMAGE_ASPECT_COLOR_BIT,
-      VK_IMAGE_VIEW_TYPE_2D,
-      1,
-      1
-
-  };
-
-  constexpr TransientImageKey normal_key = {
+  const TransientImageKey albedo_key = {
 
       VK_FORMAT_R8G8B8A8_UNORM,
       g_buffer_extent,
@@ -637,7 +623,21 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   };
 
-  constexpr TransientImageKey metallic_roughness_ao_key = {
+  const TransientImageKey normal_key = {
+
+      VK_FORMAT_R8G8_SNORM,
+      g_buffer_extent,
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      1,
+      1
+
+  };
+
+  const TransientImageKey metallic_roughness_ao_key = {
 
       VK_FORMAT_R8G8B8A8_UNORM,
       g_buffer_extent,
@@ -651,7 +651,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   };
 
-  constexpr TransientImageKey depth_key = {
+  const TransientImageKey depth_key = {
       VK_FORMAT_D32_SFLOAT,
       g_buffer_extent,
       VK_IMAGE_TYPE_2D,
@@ -778,9 +778,10 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   for (auto &m : meshes) {
 
+    
     transform_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     transform_resources[0].idx = m.transform.id;
-    transform_resources[0].size = sizeof(Mat4<float>);
+    transform_resources[0].size = sizeof(RenderModelMatrix);
     Descriptor transform_desc =
         _resource_manager->bindResources(transform_resources, p.set_layouts[1]);
 
@@ -796,7 +797,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     for (auto &img_index : m.images) {
 
       if (img_bind_index > 5)
-        continue; // Only bind albedo for now
+        
 
       auto &img_to_bind = _resource_manager->getImage(img_index);
 
@@ -830,7 +831,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     vkCmdBindVertexBuffers(graphics_command_buffer, 0, 1, &vertex_buffer.buffer,
                            &vertex_offset);
 
-    VkDeviceSize index_offset = vertex_offset + m.index_offset;
+    VkDeviceSize index_offset = m.index_offset;
 
     vkCmdBindIndexBuffer(graphics_command_buffer, vertex_buffer.buffer,
                          index_offset, VK_INDEX_TYPE_UINT32);

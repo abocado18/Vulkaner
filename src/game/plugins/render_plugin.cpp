@@ -19,7 +19,7 @@ void RenderPlugin::build(game::Game &game) {
 
   std::cout << "Initialize Render Plugin\n";
 
-  IRenderer *r = new VulkanRenderer(1280, 720);
+  IRenderer *r = new VulkanRenderer(1920, 1080);
 
   game.world.insertResource<IRenderer *>(r);
 
@@ -34,7 +34,7 @@ void RenderPlugin::build(game::Game &game) {
   RenderBuffersResource render_buffers{};
 
   ResourceHandle vertex_handle =
-      r->createBuffer(500'000'000, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+      r->createBuffer(800'000'000, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -116,12 +116,16 @@ void RenderPlugin::build(game::Game &game) {
           Mat4<float> transform_matrix = Mat4<float>::createTransformMatrix(
               transform.translation, transform.scale, transform.rotation);
 
+          RenderModelMatrix gpu_model = createRenderModelMatrix(transform_matrix);
+
           ResourceHandle transform_buffer_handle =
               render_buffers.data.at(BufferType::Transform);
 
+              
+
           gpu_transform.buffer = renderer->writeBuffer(
-              transform_buffer_handle, &transform_matrix,
-              sizeof(transform_matrix), UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
+              transform_buffer_handle, &gpu_model,
+              sizeof(gpu_model), UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
 
           cmd.push([e, gpu_transform](Ecs *world) {
             world->addComponent<GpuTransformComponent>(e, gpu_transform);

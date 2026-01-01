@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <sys/types.h>
 #include <type_traits>
 #include <utility>
@@ -549,8 +550,8 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
   alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-  vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
-                  &staging_buffer.allocation, &staging_buffer.allocation_info);
+  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
+                  &staging_buffer.allocation, &staging_buffer.allocation_info), "");
 
   staging_buffer.current_offset = 0;
   staging_buffer.size = size;
@@ -624,7 +625,11 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
   if (allocated_offset == UINT32_MAX) {
     // Not enough space
     vmaDestroyBuffer(_allocator, buf_ref.buffer, buf_ref.allocation);
-    return {};
+
+    //Implement grpwable buffer later, for now throw error
+    throw std::runtime_error("Not enough space in buffer");
+
+
   }
 
   ResourceWriteInfo info(handle.idx, {allocated_offset}, staging_buffer);
@@ -777,8 +782,8 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
   alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-  vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
-                  &staging_buffer.allocation, &staging_buffer.allocation_info);
+  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
+                  &staging_buffer.allocation, &staging_buffer.allocation_info), "");
 
   staging_buffer.current_offset = 0;
   staging_buffer.size = size;
