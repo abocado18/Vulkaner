@@ -1015,8 +1015,6 @@ void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
     constexpr uint32_t NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE =
         MAX_LIGHTED_OBJECTS * sizeof(uint32_t);
 
-  
-
     const TransientBufferKey light_staging_buffer_key = {
         LIGHT_BUFFER_CLUSTER_SIZE, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
@@ -1165,14 +1163,16 @@ void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
 
       _resource_manager->transistionTransientBuffer(
           LIGHT_STAGING_BUFFER_NAME, current_frame, lighting_command_buffer,
-          VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_WHOLE_SIZE, 0);
+          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_READ_BIT,
+          LIGHT_BUFFER_CLUSTER_SIZE, 0);
 
       _resource_manager->transistionTransientBuffer(
           LIGHT_CLUSTER_BUFFER_NAME, current_frame, lighting_command_buffer,
-          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_WHOLE_SIZE, 0);
+          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+          LIGHT_BUFFER_CLUSTER_SIZE, 0);
 
       VkBufferCopy region{};
-      region.size = VK_WHOLE_SIZE;
+      region.size = LIGHT_BUFFER_CLUSTER_SIZE;
       region.srcOffset = 0;
       region.dstOffset = 0;
 
@@ -1182,7 +1182,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
       _resource_manager->transistionTransientBuffer(
           LIGHT_CLUSTER_BUFFER_NAME, current_frame, lighting_command_buffer,
           VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-          VK_WHOLE_SIZE, 0);
+          LIGHT_BUFFER_CLUSTER_SIZE, 0);
     }
 
     {
@@ -1193,12 +1193,13 @@ void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
 
       _resource_manager->transistionTransientBuffer(
           NUMBER_LIGHTS_STAGING_BUFFER_NAME, current_frame,
-          lighting_command_buffer, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-          VK_WHOLE_SIZE, 0);
+          lighting_command_buffer, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_READ_BIT,
+          NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE, 0);
 
       _resource_manager->transistionTransientBuffer(
           NUMBER_LIGHTS_BUFFER_NAME, current_frame, lighting_command_buffer,
-          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_WHOLE_SIZE, 0);
+          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+          NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE, 0);
 
       VkBufferCopy region{};
       region.size = NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE;
@@ -1211,7 +1212,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
       _resource_manager->transistionTransientBuffer(
           NUMBER_LIGHTS_BUFFER_NAME, current_frame, lighting_command_buffer,
           VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-          VK_WHOLE_SIZE, 0);
+          NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE, 0);
     }
   }
 
