@@ -19,6 +19,8 @@ struct GpuCameraData {
 
 struct RenderCamera {
   BufferIdAndOffset camera_data{};
+
+  Mat4<float> view_matrix {}; //For Cpu Clustering
 };
 
 struct RenderMesh {
@@ -30,18 +32,38 @@ struct RenderMesh {
 
   BufferIdAndOffset material{};
 
-  std::vector<uint32_t> images{};
+  std::vector<uint32_t> images{}; //Indices for bound material textures
+
+  uint32_t object_id;
 
   uint32_t pipeline_id;
+
+  Vec3<float> world_pos;
+
+
+};
+
+enum class GpuLightType : uint32_t {
+  Directional = 0,
+  Spot = 1,
+  Point = 2,
+
 };
 
 struct GpuLightData {
 
-  Vec3<float> color;
+  std::array<float, 3> color;
+  int32_t _pad;
+
   float range;
+
   float intensity;
-  uint32_t type;
-  uint32_t _pad[2];
+  GpuLightType type;
+  
+  
+  float inner_cone_angle;
+  float outer_cone_angle;
+  int32_t _pad0[3];
 };
 
 static_assert(sizeof(GpuLightData) % 16 == 0);
@@ -50,6 +72,12 @@ struct RenderLight {
 
   BufferIdAndOffset transform{};
   BufferIdAndOffset light{};
+
+  Vec3<float> position_world_space;
+  Quat<float> rotation_world_space;
+  float radius;
+  float angle;
+  GpuLightType light_type;
 };
 
 struct RenderModelMatrix {

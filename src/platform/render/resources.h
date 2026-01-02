@@ -3,7 +3,6 @@
 #include "allocator/vk_mem_alloc.h"
 #include "platform/render/deletion_queue.h"
 #include "platform/render/render_object.h"
-#include "platform/render/vk_utils.h"
 #include "platform/render/vulkan_macros.h"
 #include "volk.h"
 #include <array>
@@ -238,8 +237,45 @@ struct ResourceWriteInfo {
 
   struct BufferWriteData {
     VkAccessFlags new_access;
+    uint32_t write_size;
+    uint32_t write_offset;
   } buffer_write_data;
 };
+
+struct TransientBufferKey {
+  uint32_t size;
+  VkBufferUsageFlags usage_flags;
+
+  VmaAllocationCreateFlags allocation_flags;
+
+  uint32_t queue_family;
+
+  const bool operator==(const TransientBufferKey &other) const {
+    return (size == other.size) && (usage_flags == other.usage_flags) &&
+           (allocation_flags == other.allocation_flags) &&
+           (queue_family == other.queue_family);
+  }
+};
+
+namespace std {
+template <> struct hash<TransientBufferKey> {
+  size_t operator()(const TransientBufferKey &key) const noexcept {
+    size_t h = 0;
+    h ^= std::hash<uint32_t>{}(key.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+    h ^= std::hash<VkBufferUsageFlags>{}(key.usage_flags) + 0x9e3779b9 +
+         (h << 6) + (h >> 2);
+
+    h ^= std::hash<VmaAllocationCreateFlags>{}(key.allocation_flags) +
+         0x9e3779b9 + (h << 6) + (h >> 2);
+
+    h ^= std::hash<uint32_t>{}(key.queue_family) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+
+    return h;
+  }
+};
+} // namespace std
 
 struct TransientImageKey {
 
@@ -249,6 +285,7 @@ struct TransientImageKey {
   VkImageUsageFlags image_usage{};
   VkImageAspectFlags aspect_mask{};
   VkImageViewType view_type{};
+  uint32_t queue_family{};
   uint32_t mip_levels{};
   uint32_t array_layers{};
 
@@ -258,7 +295,9 @@ struct TransientImageKey {
            extent.depth == other.extent.depth &&
            image_type == other.image_type && image_usage == other.image_usage &&
            view_type == other.view_type && aspect_mask == other.aspect_mask &&
-           mip_levels == other.mip_levels && array_layers == other.array_layers;
+           mip_levels == other.mip_levels &&
+           array_layers == other.array_layers &&
+           queue_family == other.queue_family;
   };
 };
 
@@ -281,6 +320,9 @@ template <> struct hash<TransientImageKey> {
     h ^= std::hash<uint32_t>{}(key.extent.height) + 0x9e3779b9 + (h << 6) +
          (h >> 2);
     h ^= std::hash<uint32_t>{}(key.extent.depth) + 0x9e3779b9 + (h << 6) +
+         (h >> 2);
+
+    h ^= std::hash<uint32_t>{}(key.queue_family) + 0x9e3779b9 + (h << 6) +
          (h >> 2);
     return h;
   }
@@ -352,6 +394,18 @@ public:
     return placeholder_image_handle;
   }
 
+  Buffer getTransientBuffer(const std::string &name, const uint32_t frame);
+
+  void registerTransientBuffer(const std::string &name,
+                               const TransientBufferKey &key);
+
+  void resetAllTransientBuffers(const uint32_t frame);
+
+  void transistionTransientBuffer(const std::string &name, const uint32_t frame,
+                                  VkCommandBuffer cmd, VkAccessFlags old_access,
+                                  VkAccessFlags new_access, uint32_t size,
+                                  uint32_t offset);
+
   void transistionResourceImage(VkCommandBuffer cmd, size_t resource_idx,
                                 VkImageLayout new_layout,
                                 uint32_t mip_levels = 1,
@@ -361,7 +415,8 @@ public:
 
   void transistionResourceBuffer(VkCommandBuffer cmd, size_t resource_idx,
                                  VkAccessFlags old_access,
-                                 VkAccessFlags new_access,
+                                 VkAccessFlags new_access, uint32_t size,
+                                 uint32_t offset,
                                  uint32_t src_queue_family = UINT32_MAX,
                                  uint32_t dst_queue_family = UINT32_MAX);
 
@@ -369,7 +424,8 @@ public:
                    uint32_t old_family_index, uint32_t new_family_index);
 
   void commitWriteTransmit(VkCommandBuffer cmd, ResourceWriteInfo &write_info,
-                   uint32_t old_family_index, uint32_t new_family_index);
+                           uint32_t old_family_index,
+                           uint32_t new_family_index);
 
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources{};
@@ -391,6 +447,19 @@ private:
     std::unordered_map<std::string, TransientImageKey>
         transient_virtual_images{};
   };
+
+  struct TransientBuffersCache {
+    std::unordered_map<TransientBufferKey, std::vector<Buffer>>
+        free_transient_buffers{};
+
+    std::unordered_map<std::string, std::pair<TransientBufferKey, Buffer>>
+        used_transient_buffers{};
+
+    std::unordered_map<std::string, TransientBufferKey>
+        transient_virtual_buffers{};
+  };
+
+  std::array<TransientBuffersCache, FRAMES_IN_FLIGHT> transient_buffers_cache{};
 
   std::array<TransientImagesCache, FRAMES_IN_FLIGHT> transient_images_cache{};
 

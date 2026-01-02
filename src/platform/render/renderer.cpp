@@ -10,6 +10,7 @@
 #include "platform/render/vulkan_macros.h"
 #include "vulkan/vulkan_core.h"
 #include <X11/Xmd.h>
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,15 +23,20 @@
 
 #include "VkBootstrap.h"
 
-//G Buffers excluding Depth Buffer
+// G Buffers excluding Depth Buffer
 constexpr VkFormat G_BUFFER_FORMATS[] = {
-    VK_FORMAT_R8G8B8A8_UNORM,
-    VK_FORMAT_R8G8_SNORM,
-    VK_FORMAT_R8G8_UNORM,
+    VK_FORMAT_R8G8B8A8_UNORM,          // Albedo
+    VK_FORMAT_R8G8_SNORM,              // Normal
+    VK_FORMAT_R8G8_UNORM,              // Material
+    VK_FORMAT_B10G11R11_UFLOAT_PACK32, // Emissive,
+    VK_FORMAT_R16G16_UINT,             // Object Id + Lighting Id
 
 };
 
-//G Buffers Count excluding Depth Buffer
+constexpr VkFormat LIGHTING_IMAGE_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr const char *LIGHTING_IMAGE_NAME = "Lighting Image";
+
+// G Buffers Count excluding Depth Buffer
 constexpr uint32_t NUMBER_G_BUFFERS =
     sizeof(G_BUFFER_FORMATS) / sizeof(VkFormat);
 
@@ -103,10 +109,14 @@ VulkanRenderer::VulkanRenderer(uint32_t width, uint32_t height)
   builder.rendering_info.pColorAttachmentFormats = G_BUFFER_FORMATS;
 
   auto default_col_attachment = builder.color_blend_attachments[0];
+  default_col_attachment.blendEnable = VK_FALSE;
+  builder.color_blend_attachments[0] = default_col_attachment;
+  builder.color_blend_attachments.push_back(default_col_attachment);
+  builder.color_blend_attachments.push_back(default_col_attachment);
   builder.color_blend_attachments.push_back(default_col_attachment);
   builder.color_blend_attachments.push_back(default_col_attachment);
 
-  assert(builder.color_blend_attachments.size() == 3);
+  assert(builder.color_blend_attachments.size() == NUMBER_G_BUFFERS);
 
   _pipeline_manager->createGraphicsPipeline(
       builder, std::array<std::string, 4>{"gbuffer", "vertexMain", "gbuffer",
@@ -137,11 +147,17 @@ VulkanRenderer::~VulkanRenderer() {
                              nullptr);
       }
 
-      vkDestroySemaphore(_device, _frames[i]._swapchain_semaphore, nullptr);
-      vkDestroySemaphore(_device, _frames[i]._transfer_semaphore, nullptr);
-      vkDestroySemaphore(_device, _frames[i]._compute_semaphore, nullptr);
+      vkDestroySemaphore(
+          _device, _frames[i]._swapchain_image_available_semaphore, nullptr);
+      vkDestroySemaphore(_device, _frames[i]._transfer_finished_semaphore,
+                         nullptr);
+      vkDestroySemaphore(_device, _frames[i]._graphics_finished_semaphore,
+                         nullptr);
 
-      for (auto &s : _frames[i]._render_semaphores) {
+      vkDestroySemaphore(_device, _frames[i]._lighting_finished_semaphore,
+                         nullptr);
+
+      for (auto &s : _frames[i]._swapchain_image_finished_semaphores) {
         vkDestroySemaphore(_device, s, nullptr);
       }
 
@@ -370,14 +386,21 @@ void VulkanRenderer::initCommands() {
 
     VkCommandBufferAllocateInfo alloc_info = {};
 
+    VkCommandBuffer buffers_to_allocate[3] = {};
+
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    alloc_info.commandBufferCount = 1;
+    alloc_info.commandBufferCount =
+        sizeof(buffers_to_allocate) / sizeof(VkCommandBuffer);
     alloc_info.commandPool = _frames[i]._graphics_command_pool;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
-    VK_ERROR(vkAllocateCommandBuffers(_device, &alloc_info,
-                                      &_frames[i]._graphics_command_buffer),
-             "Could not allocate Command Buffer");
+    VK_ERROR(
+        vkAllocateCommandBuffers(_device, &alloc_info, buffers_to_allocate),
+        "Could not allocate Command Buffers");
+
+    _frames[i]._graphics_command_buffer = buffers_to_allocate[0];
+    _frames[i]._copy_to_swapchain_command_buffer = buffers_to_allocate[1];
+    _frames[i]._lighting_command_buffer = buffers_to_allocate[2];
   }
 
   if (_dedicated_compute) {
@@ -477,31 +500,38 @@ void VulkanRenderer::initSyncStructures() {
                            &_frames[i]._render_fence),
              "Could not create fence");
 
-    _frames[i]._render_semaphores.resize(_swapchain_images.size());
+    _frames[i]._swapchain_image_finished_semaphores.resize(
+        _swapchain_images.size());
 
-    for (auto &render_semaphore : _frames[i]._render_semaphores) {
+    for (auto &render_semaphore :
+         _frames[i]._swapchain_image_finished_semaphores) {
 
       VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
                                  &render_semaphore),
                "Could not create Render Semaphore");
     }
 
-    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
-                               &_frames[i]._swapchain_semaphore),
-             "Could not create Swapchain Semaphore");
+    VK_ERROR(
+        vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                          &_frames[i]._swapchain_image_available_semaphore),
+        "Could not create Swapchain Semaphore");
 
     VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
-                               &_frames[i]._transfer_semaphore),
+                               &_frames[i]._lighting_finished_semaphore),
+             "Could not create Lighting Semaphore");
+
+    VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
+                               &_frames[i]._transfer_finished_semaphore),
              "Could not create Transfer Semaphore");
 
     VK_ERROR(vkCreateSemaphore(_device, &semaphore_create_info, nullptr,
-                               &_frames[i]._compute_semaphore),
+                               &_frames[i]._graphics_finished_semaphore),
              "Could not create Transfer Semaphore");
   }
 }
 
-void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
-                          std::vector<RenderLight> &lights) {
+void VulkanRenderer::draw(RenderCamera &camera, std::span<RenderMesh> meshes,
+                          std::span<RenderLight> lights) {
 
   glfwPollEvents();
 
@@ -525,8 +555,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   uint32_t swapchain_image_index;
 
   VkResult aquire_res = vkAcquireNextImageKHR(
-      _device, _swapchain, UINT64_MAX, getCurrentFrame()._swapchain_semaphore,
-      nullptr, &swapchain_image_index);
+      _device, _swapchain, UINT64_MAX,
+      getCurrentFrame()._swapchain_image_available_semaphore, nullptr,
+      &swapchain_image_index);
 
   if (aquire_res == VK_ERROR_OUT_OF_DATE_KHR) {
     _resized_requested = true;
@@ -537,8 +568,12 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
       getCurrentFrame()._graphics_command_buffer;
   VkCommandBuffer transfer_command_buffer =
       getCurrentFrame()._transfer_command_buffer;
-  VkCommandBuffer compute_command_buffer =
-      getCurrentFrame()._compute_command_buffer;
+
+  VkCommandBuffer copy_swapchain_command_buffer =
+      getCurrentFrame()._copy_to_swapchain_command_buffer;
+
+  VkCommandBuffer lighting_command_buffer =
+      getCurrentFrame()._lighting_command_buffer;
 
   VK_CHECK(
       vkResetCommandPool(_device, getCurrentFrame()._graphics_command_pool, 0),
@@ -554,6 +589,14 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     VK_CHECK(vkResetCommandPool(_device,
                                 getCurrentFrame()._transfer_command_pool, 0),
              "Graphics Command Buffer");
+  }
+
+  // Implement cpu culling later
+  culled_meshes.clear();
+  culled_meshes.reserve(meshes.size());
+
+  for (auto &m : meshes) {
+    culled_meshes.push_back(m);
   }
 
   // Commands start here
@@ -588,17 +631,15 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
     vkEndCommandBuffer(transfer_command_buffer);
 
-    VkSemaphoreSubmitInfo signal_info =
-        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                                      getCurrentFrame()._transfer_semaphore);
+    VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+        getCurrentFrame()._transfer_finished_semaphore);
 
     VkCommandBufferSubmitInfo command_buffer_submit_info =
         vk_utils::commandBufferSubmitInfo(transfer_command_buffer);
 
-    VkSubmitInfo2 submit =
-        vk_utils::submitInfo(&command_buffer_submit_info,
-                             _dedicated_transfer ? &signal_info : nullptr,
-                             _dedicated_transfer ? 1 : 0, nullptr, 0);
+    VkSubmitInfo2 submit = vk_utils::submitInfo(&command_buffer_submit_info,
+                                                &signal_info, 1, nullptr, 0);
 
     VK_CHECK(vkQueueSubmit2(_transfer_queue, 1, &submit, 0),
              "Submit Transfer Commands");
@@ -609,7 +650,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
 #pragma endregion
 
-#pragma region Start Drawing
+#pragma region GBuffer
 
   const VkExtent3D g_buffer_extent = {draw_image_size[0], draw_image_size[1],
                                       1};
@@ -623,6 +664,7 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       VK_IMAGE_ASPECT_COLOR_BIT,
       VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
       1,
       1
 
@@ -637,12 +679,13 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       VK_IMAGE_ASPECT_COLOR_BIT,
       VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
       1,
       1
 
   };
 
-  const TransientImageKey metallic_roughness_ao_key = {
+  const TransientImageKey metallic_roughness_key = {
 
       G_BUFFER_FORMATS[2],
       g_buffer_extent,
@@ -651,6 +694,37 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       VK_IMAGE_ASPECT_COLOR_BIT,
       VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
+      1,
+      1
+
+  };
+
+  const TransientImageKey emissive_key = {
+
+      G_BUFFER_FORMATS[3],
+      g_buffer_extent,
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
+      1,
+      1
+
+  };
+
+  const TransientImageKey object_lighting_id_key = {
+
+      G_BUFFER_FORMATS[4],
+      g_buffer_extent,
+      VK_IMAGE_TYPE_2D,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT,
+      VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
       1,
       1
 
@@ -664,16 +738,23 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
           VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       VK_IMAGE_ASPECT_DEPTH_BIT,
       VK_IMAGE_VIEW_TYPE_2D,
+      _graphics_queue_family,
       1,
       1};
 
-  constexpr const char *GBufferNames[] = {"Albedo", "Depth", "Normal", "MRAO"};
+  constexpr const char *GBufferNames[] = {
+      "Albedo", "Depth", "Normal", "MRAO", "Emissive", "Object Lighting Id"};
 
   _resource_manager->registerTransientImage(GBufferNames[0], albedo_key);
   _resource_manager->registerTransientImage(GBufferNames[1], depth_key);
   _resource_manager->registerTransientImage(GBufferNames[2], normal_key);
   _resource_manager->registerTransientImage(GBufferNames[3],
-                                            metallic_roughness_ao_key);
+                                            metallic_roughness_key);
+
+  _resource_manager->registerTransientImage(GBufferNames[4], emissive_key);
+
+  _resource_manager->registerTransientImage(GBufferNames[5],
+                                            object_lighting_id_key);
 
   const uint32_t current_frame = _frame_number % FRAMES_IN_FLIGHT;
 
@@ -688,6 +769,12 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   Image _mrao_image =
       _resource_manager->getTransientImage(GBufferNames[3], current_frame);
+
+  Image _emissive_image =
+      _resource_manager->getTransientImage(GBufferNames[4], current_frame);
+
+  Image _object_lighting_id_image =
+      _resource_manager->getTransientImage(GBufferNames[5], current_frame);
 
   {
     VkCommandBufferBeginInfo begin_info = {};
@@ -726,6 +813,10 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
       GBufferNames[3], current_frame, graphics_command_buffer,
       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
+  _resource_manager->transistionTransientImage(
+      GBufferNames[5], current_frame, graphics_command_buffer,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
   VkClearValue color_clear_value{};
   color_clear_value.color = {1.0f, 1.0f, 1.0f, 1.0f};
 
@@ -741,15 +832,25 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
       vk_utils::attachmentInfo(_mrao_image.view, &color_clear_value,
                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
 
+      vk_utils::attachmentInfo(_emissive_image.view, &color_clear_value,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
+
+      vk_utils::attachmentInfo(_object_lighting_id_image.view,
+                               &color_clear_value,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
   };
+
+  static_assert(sizeof(g_buffer_info) / sizeof(VkRenderingAttachmentInfo) ==
+                NUMBER_G_BUFFERS);
 
   auto depth_info =
       vk_utils::attachmentInfo(_depth_image.view, &depth_clear_value,
                                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-  auto render_info = vk_utils::renderingInfo(
-      g_buffer_info, 3, {g_buffer_extent.width, g_buffer_extent.height}, {0, 0},
-      &depth_info, VK_NULL_HANDLE);
+  auto render_info =
+      vk_utils::renderingInfo(g_buffer_info, NUMBER_G_BUFFERS,
+                              {g_buffer_extent.width, g_buffer_extent.height},
+                              {0, 0}, &depth_info, VK_NULL_HANDLE);
 
   vkCmdBeginRendering(graphics_command_buffer, &render_info);
 
@@ -781,7 +882,9 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
 
   std::vector<CombinedResourceIndexAndDescriptorType> material_resources(1);
 
-  for (auto &m : meshes) {
+  for (size_t mesh_index = 0; mesh_index < culled_meshes.size(); mesh_index++) {
+
+    const auto &m = culled_meshes[mesh_index];
 
     transform_resources[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     transform_resources[0].idx = m.transform.id;
@@ -842,29 +945,20 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       _pipeline_manager->getPipelineByIdx(0).pipeline);
 
+    uint32_t push_constant_data[] = {
+        m.object_id, // Object id
+        0,           // Lighting Id
+    };
+
+    vkCmdPushConstants(graphics_command_buffer, p.layout,
+                       VK_SHADER_STAGE_VERTEX_BIT |
+                           VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(push_constant_data), push_constant_data);
+
     vkCmdDrawIndexed(graphics_command_buffer, m.index_count, 1, 0, 0, 0);
   }
 
   vkCmdEndRendering(graphics_command_buffer);
-
-  _resource_manager->transistionTransientImage(
-      GBufferNames[0], current_frame, graphics_command_buffer,
-      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-  vk_utils::transistionImage(graphics_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             _swapchain_images[swapchain_image_index]);
-
-  vk_utils::copyImageToImage(
-      graphics_command_buffer, _albedo_image.image,
-      _swapchain_images[swapchain_image_index],
-      {_albedo_image.extent.width, _albedo_image.extent.height},
-      _swapchain_extent);
-
-  vk_utils::transistionImage(graphics_command_buffer,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                             _swapchain_images[swapchain_image_index]);
 
   VK_CHECK(vkEndCommandBuffer(graphics_command_buffer), "End Command Buffer");
   {
@@ -872,40 +966,369 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
     VkCommandBufferSubmitInfo command_submit_info =
         vk_utils::commandBufferSubmitInfo(graphics_command_buffer);
 
-    VkSemaphoreSubmitInfo wait_swapchain_info = vk_utils::semaphoreSubmitInfo(
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-        getCurrentFrame()._swapchain_semaphore);
-
-    VkSemaphoreSubmitInfo wait_transfer_info =
-        vk_utils::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                      getCurrentFrame()._transfer_semaphore);
+    VkSemaphoreSubmitInfo wait_transfer_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        getCurrentFrame()._transfer_finished_semaphore);
 
     VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
         VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
-        getCurrentFrame()._render_semaphores[swapchain_image_index]);
+        getCurrentFrame()._graphics_finished_semaphore);
 
     VkSubmitInfo2 submit_info;
 
-    if (_dedicated_transfer) {
+    VkSemaphoreSubmitInfo wait_infos[] = {wait_transfer_info};
 
-      VkSemaphoreSubmitInfo wait_infos[] = {wait_swapchain_info,
-                                            wait_transfer_info};
+    submit_info = vk_utils::submitInfo(
+        &command_submit_info, &signal_info, 1, wait_infos,
+        sizeof(wait_infos) / sizeof(VkSemaphoreSubmitInfo));
 
-      submit_info = vk_utils::submitInfo(&command_submit_info, &signal_info, 1,
-                                         wait_infos, 2);
-
-    } else {
-
-      submit_info = vk_utils::submitInfo(&command_submit_info, &signal_info, 1,
-                                         &wait_swapchain_info, 1);
-    }
-
-    VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info,
-                            getCurrentFrame()._render_fence),
+    VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info, 0),
              "Submit Graphics Commands");
   }
 
+#pragma region Lighting Pass
+
+  {
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(lighting_command_buffer, &begin_info),
+             "Start Command Buffer");
+  }
+
+  {
+    // Light CLustering
+
+    constexpr uint32_t MAX_LIGHT_PER_OBJECT = 16;
+    constexpr uint32_t MAX_LIGHTED_OBJECTS = 5'000;
+
+    constexpr const char *LIGHT_STAGING_BUFFER_NAME = "Light Staging Buffer";
+    constexpr const char *NUMBER_LIGHTS_STAGING_BUFFER_NAME =
+        "Light Number Per Mesh Staging Buffer";
+    constexpr const char *LIGHT_CLUSTER_BUFFER_NAME = "Light Cluster Buffer";
+    constexpr const char *NUMBER_LIGHTS_BUFFER_NAME = "Number Lights Buffer";
+
+    constexpr uint32_t LIGHT_BUFFER_CLUSTER_SIZE =
+        MAX_LIGHT_PER_OBJECT * MAX_LIGHTED_OBJECTS * sizeof(uint32_t);
+
+    constexpr uint32_t NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE =
+        MAX_LIGHTED_OBJECTS * sizeof(uint32_t);
+
+  
+
+    const TransientBufferKey light_staging_buffer_key = {
+        LIGHT_BUFFER_CLUSTER_SIZE, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        _graphics_queue_family};
+
+    const TransientBufferKey number_staging_buffer_key = {
+        NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        _graphics_queue_family};
+
+    const TransientBufferKey number_lights_buffer_key = {
+        NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, _graphics_queue_family};
+
+    const TransientBufferKey light_cluster_buffer_key = {
+        LIGHT_BUFFER_CLUSTER_SIZE,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, _graphics_queue_family};
+
+    _resource_manager->registerTransientBuffer(LIGHT_STAGING_BUFFER_NAME,
+                                               light_staging_buffer_key);
+
+    _resource_manager->registerTransientBuffer(
+        NUMBER_LIGHTS_STAGING_BUFFER_NAME, number_staging_buffer_key);
+
+    _resource_manager->registerTransientBuffer(LIGHT_CLUSTER_BUFFER_NAME,
+                                               light_cluster_buffer_key);
+
+    _resource_manager->registerTransientBuffer(NUMBER_LIGHTS_BUFFER_NAME,
+                                               number_lights_buffer_key);
+
+    Buffer light_staging_buffer = _resource_manager->getTransientBuffer(
+        LIGHT_STAGING_BUFFER_NAME, current_frame);
+
+    Buffer number_staging_buffer = _resource_manager->getTransientBuffer(
+        NUMBER_LIGHTS_STAGING_BUFFER_NAME, current_frame);
+
+    Buffer clustering_buffer = _resource_manager->getTransientBuffer(
+        LIGHT_CLUSTER_BUFFER_NAME, current_frame);
+
+    Buffer number_buffer = _resource_manager->getTransientBuffer(
+        NUMBER_LIGHTS_BUFFER_NAME, current_frame);
+
+    std::array<uint32_t, MAX_LIGHT_PER_OBJECT * MAX_LIGHTED_OBJECTS>
+        per_object_light_clusters{};
+
+    std::array<uint32_t, MAX_LIGHTED_OBJECTS> current_object_light_counts = {};
+
+    size_t max_meshes = std::min(culled_meshes.size(),
+                                 static_cast<size_t>(MAX_LIGHTED_OBJECTS));
+
+    for (uint32_t light_index = 0; light_index < lights.size(); light_index++) {
+
+      RenderLight &l = lights[light_index];
+
+      if (l.light_type == GpuLightType::Directional) {
+
+        for (size_t obj_index = 0; obj_index < max_meshes; obj_index++) {
+
+          if (current_object_light_counts[obj_index] < MAX_LIGHT_PER_OBJECT) {
+
+            per_object_light_clusters[obj_index * MAX_LIGHT_PER_OBJECT +
+                                      current_object_light_counts[obj_index]] =
+                light_index;
+
+            current_object_light_counts[obj_index]++;
+          }
+        }
+
+      } else if (l.light_type == GpuLightType::Point) {
+
+        Vec3<float> light_world_position = l.position_world_space;
+        float range = l.radius;
+        float range_squared = range * range;
+
+        for (size_t obj_index = 0; obj_index < max_meshes; obj_index++) {
+
+          const auto &m = culled_meshes[obj_index];
+
+          Vec3<float> mesh_world_position = m.world_pos;
+
+          Vec3<float> diff = mesh_world_position - light_world_position;
+          float distance_squared = diff * diff;
+
+          if (distance_squared <= range_squared) {
+
+            if (current_object_light_counts[obj_index] < MAX_LIGHT_PER_OBJECT) {
+              per_object_light_clusters
+                  [obj_index * MAX_LIGHT_PER_OBJECT +
+                   current_object_light_counts[obj_index]] = light_index;
+
+              current_object_light_counts[obj_index]++;
+            }
+          }
+        }
+      }
+
+      else if (l.light_type == GpuLightType::Spot) {
+
+        Vec3<float> light_world_position = l.position_world_space;
+        float range = l.radius;
+        Quat<float> light_world_rotation = l.rotation_world_space;
+
+        float angle = l.angle;
+
+        Vec3<float> direction = light_world_rotation * Vec3<float>::forward();
+
+        float half_range = range * 0.5f;
+
+        float base_radius = half_range * std::tan(angle * 0.5f);
+
+        Vec3<float> sphere_center =
+            light_world_position + direction * half_range;
+        float sphere_radius = half_range + base_radius;
+
+        float range_squared = sphere_radius * sphere_radius;
+
+        for (size_t obj_index = 0; obj_index < max_meshes; obj_index++) {
+
+          const auto &m = culled_meshes[obj_index];
+
+          Vec3<float> mesh_world_position = m.world_pos;
+
+          Vec3<float> diff = mesh_world_position - sphere_center;
+          float distance_squared = diff * diff;
+
+          if (distance_squared <= range_squared) {
+
+            if (current_object_light_counts[obj_index] < MAX_LIGHT_PER_OBJECT) {
+              per_object_light_clusters
+                  [obj_index * MAX_LIGHT_PER_OBJECT +
+                   current_object_light_counts[obj_index]] = light_index;
+
+              current_object_light_counts[obj_index]++;
+            }
+          }
+        }
+      }
+    }
+    {
+      std::memcpy(light_staging_buffer.allocation_info.pMappedData,
+                  per_object_light_clusters.data(), LIGHT_BUFFER_CLUSTER_SIZE);
+
+      _resource_manager->transistionTransientBuffer(
+          LIGHT_STAGING_BUFFER_NAME, current_frame, lighting_command_buffer,
+          VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_WHOLE_SIZE, 0);
+
+      _resource_manager->transistionTransientBuffer(
+          LIGHT_CLUSTER_BUFFER_NAME, current_frame, lighting_command_buffer,
+          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_WHOLE_SIZE, 0);
+
+      VkBufferCopy region{};
+      region.size = VK_WHOLE_SIZE;
+      region.srcOffset = 0;
+      region.dstOffset = 0;
+
+      vkCmdCopyBuffer(lighting_command_buffer, light_staging_buffer.buffer,
+                      clustering_buffer.buffer, 1, &region);
+
+      _resource_manager->transistionTransientBuffer(
+          LIGHT_CLUSTER_BUFFER_NAME, current_frame, lighting_command_buffer,
+          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+          VK_WHOLE_SIZE, 0);
+    }
+
+    {
+
+      std::memcpy(number_staging_buffer.allocation_info.pMappedData,
+                  current_object_light_counts.data(),
+                  NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE);
+
+      _resource_manager->transistionTransientBuffer(
+          NUMBER_LIGHTS_STAGING_BUFFER_NAME, current_frame,
+          lighting_command_buffer, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+          VK_WHOLE_SIZE, 0);
+
+      _resource_manager->transistionTransientBuffer(
+          NUMBER_LIGHTS_BUFFER_NAME, current_frame, lighting_command_buffer,
+          VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_WHOLE_SIZE, 0);
+
+      VkBufferCopy region{};
+      region.size = NUMBER_LIGHTS_PER_MESH_CLUSTER_SIZE;
+      region.srcOffset = 0;
+      region.dstOffset = 0;
+
+      vkCmdCopyBuffer(lighting_command_buffer, number_staging_buffer.buffer,
+                      number_buffer.buffer, 1, &region);
+
+      _resource_manager->transistionTransientBuffer(
+          NUMBER_LIGHTS_BUFFER_NAME, current_frame, lighting_command_buffer,
+          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+          VK_WHOLE_SIZE, 0);
+    }
+  }
+
+  {
+    const TransientImageKey lighted_image_key = {
+        LIGHTING_IMAGE_FORMAT,
+        {draw_image_size[0], draw_image_size[1], 1},
+        VK_IMAGE_TYPE_2D,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        VK_IMAGE_VIEW_TYPE_2D,
+        _graphics_queue_family,
+        1,
+        1,
+    };
+
+    _resource_manager->registerTransientImage(LIGHTING_IMAGE_NAME,
+                                              lighted_image_key);
+  }
+
+  vkEndCommandBuffer(lighting_command_buffer);
+  {
+    VkCommandBufferSubmitInfo command_submit_info =
+        vk_utils::commandBufferSubmitInfo(lighting_command_buffer);
+
+    VkSemaphoreSubmitInfo wait_graphics_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        getCurrentFrame()._graphics_finished_semaphore);
+
+    VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
+        getCurrentFrame()._lighting_finished_semaphore);
+
+    VkSubmitInfo2 submit_info;
+
+    VkSemaphoreSubmitInfo wait_infos[] = {wait_graphics_info};
+
+    submit_info = vk_utils::submitInfo(
+        &command_submit_info, &signal_info, 1, wait_infos,
+        sizeof(wait_infos) / sizeof(VkSemaphoreSubmitInfo));
+
+    VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info, 0),
+             "Submit Light Commands");
+  }
+
 #pragma endregion
+
+#pragma endregion
+
+#pragma region To Swapchain Image
+
+  {
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(copy_swapchain_command_buffer, &begin_info),
+             "Start Command Buffer");
+  }
+
+  _resource_manager->transistionTransientImage(
+      GBufferNames[0], current_frame, copy_swapchain_command_buffer,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+  vk_utils::transistionImage(copy_swapchain_command_buffer,
+                             VK_IMAGE_LAYOUT_UNDEFINED,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             _swapchain_images[swapchain_image_index]);
+
+  vk_utils::copyImageToImage(
+      copy_swapchain_command_buffer, _albedo_image.image,
+      _swapchain_images[swapchain_image_index],
+      {_albedo_image.extent.width, _albedo_image.extent.height},
+      _swapchain_extent);
+
+  vk_utils::transistionImage(copy_swapchain_command_buffer,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                             _swapchain_images[swapchain_image_index]);
+
+  vkEndCommandBuffer(copy_swapchain_command_buffer);
+
+  {
+
+    VkCommandBufferSubmitInfo command_submit_info =
+        vk_utils::commandBufferSubmitInfo(copy_swapchain_command_buffer);
+
+    VkSemaphoreSubmitInfo wait_swapchain_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+        getCurrentFrame()._swapchain_image_available_semaphore);
+
+    VkSemaphoreSubmitInfo wait_lighting_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        getCurrentFrame()._lighting_finished_semaphore);
+
+    VkSemaphoreSubmitInfo signal_info = vk_utils::semaphoreSubmitInfo(
+        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT_KHR,
+        getCurrentFrame()
+            ._swapchain_image_finished_semaphores[swapchain_image_index]);
+
+    VkSubmitInfo2 submit_info;
+
+    VkSemaphoreSubmitInfo wait_infos[] = {wait_swapchain_info,
+                                          wait_lighting_info};
+
+    submit_info = vk_utils::submitInfo(
+        &command_submit_info, &signal_info, 1, wait_infos,
+        sizeof(wait_infos) / sizeof(VkSemaphoreSubmitInfo));
+
+    VK_CHECK(vkQueueSubmit2(_graphics_queue, 1, &submit_info,
+                            getCurrentFrame()._render_fence),
+             "Submit Copy to swapchain Commands");
+  }
+
+#pragma endregion
+
+#pragma region Present
 
   VkPresentInfoKHR present_info = {};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -913,7 +1336,8 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   present_info.pSwapchains = &_swapchain;
   present_info.waitSemaphoreCount = 1;
   present_info.pWaitSemaphores =
-      &getCurrentFrame()._render_semaphores[swapchain_image_index];
+      &getCurrentFrame()
+           ._swapchain_image_finished_semaphores[swapchain_image_index];
 
   present_info.pImageIndices = &swapchain_image_index;
 
@@ -922,6 +1346,8 @@ void VulkanRenderer::draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
   if (present_res == VK_ERROR_OUT_OF_DATE_KHR) {
     _resized_requested = true;
   }
+
+#pragma endregion
 
   _resource_manager->resetAllTransientImages(_frame_number % FRAMES_IN_FLIGHT);
 

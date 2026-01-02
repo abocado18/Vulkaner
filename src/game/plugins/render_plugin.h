@@ -24,9 +24,6 @@ struct AssetImage {
 };
 
 struct AssetMaterial {
- 
-
-  
 
   RenderMaterial material_parameters;
 
@@ -43,7 +40,6 @@ struct AssetMesh {
   uint32_t instance_count;
 };
 
-
 struct RenderInstance {
   AssetHandle<AssetMesh> mesh{};
   AssetHandle<AssetMaterial> material{};
@@ -59,9 +55,31 @@ struct TransformComponent {
   Vec3<float> scale;
 };
 
+enum class LightType : uint8_t {
+  Directional,
+  Spot,
+  Point,
+};
+
+struct LightComponent {
+
+  LightType type{};
+  float intensity;
+  std::array<float, 3> color;
+
+  std::array<float, 2> cone_angles{};
+
+  float range;
+};
+
 struct GpuTransformComponent {
   BufferHandle buffer;
 };
+
+struct GpuLightComponent {
+  BufferHandle buffer;
+};
+
 
 struct CameraComponent {
 
@@ -70,10 +88,8 @@ struct CameraComponent {
   float far_plane;
   float aspect;
 
-
   float x_mag;
   float y_mag;
-  
 
   enum class Projection { Ortho, Perspective };
 
@@ -90,11 +106,12 @@ struct ExtractedRendererResources {
   std::vector<RenderLight> lights;
 };
 
-enum class BufferType {
+enum class BufferType : uint8_t {
   Vertex,
   Material,
   Transform,
   Camera,
+  Light
 };
 
 /// Handle to Render Buffers to upload data

@@ -473,13 +473,34 @@ void ScenePlugin::build(game::Game &game) {
             asset_material.images.push_back(placeholder_asset_handle);
           }
 
+          if (gltf_m.emissiveTexture.has_value()) {
+
+            asset_material.material_parameters.use_textures[3] = 1;
+
+            auto &tex =
+                asset->textures[gltf_m.emissiveTexture.value().textureIndex];
+
+            // Assume ktx2 texture
+            assert(tex.basisuImageIndex.has_value());
+            auto &img = asset->images[tex.basisuImageIndex.value()];
+
+            AssetHandle<AssetImage> new_handle = loadImage(
+                asset.get(), img,
+                scene_path + std::to_string(tex.basisuImageIndex.value()));
+
+            asset_material.images.push_back(new_handle);
+          } else {
+            asset_material.material_parameters.use_textures[3] = 0;
+            asset_material.images.push_back(placeholder_asset_handle);
+          }
+
           asset_material.buffer_handle = renderer->writeBuffer(
               material_buffer_handle, &asset_material.material_parameters,
               sizeof(asset_material.material_parameters), UINT32_MAX,
               VK_ACCESS_SHADER_READ_BIT);
 
           index_to_mat[mat_index] = asset_mat_data_assets_ptr->registerAsset(
-              asset_material, std::to_string(mat_index));
+              asset_material, scene_path + std::to_string(mat_index));
         }
 
 #pragma endregion
@@ -665,8 +686,6 @@ void ScenePlugin::build(game::Game &game) {
           Entity &node_entity = index_to_entity[node_index];
           fastgltf::Node &node = asset->nodes[node_index];
 
-          std::cout << "Load Node: " << node.name << "\n";
-
           {
             auto it = child_index_to_parent_index.find(node_index);
 
@@ -821,10 +840,53 @@ void ScenePlugin::build(game::Game &game) {
                 render_component.meshes.push_back(current_instance);
               }
 
+             
+
               world->addComponent<RenderComponent>(node_entity,
                                                    render_component);
             }
           }
+
+           {
+                if (node.lightIndex.has_value()) {
+
+               
+
+                  auto &gltf_light = asset->lights[node.lightIndex.value()];
+
+                  LightComponent light_comp{};
+
+                  light_comp.color = std::array<float, 3>{gltf_light.color[0],
+                                                          gltf_light.color[1],
+                                                          gltf_light.color[2]};
+
+                  light_comp.intensity = gltf_light.intensity;
+
+                  light_comp.range = gltf_light.range.has_value() ? gltf_light.range.value() : 5.0f;
+
+                  switch (gltf_light.type) {
+
+                  case fastgltf::LightType::Directional:
+                    light_comp.type = LightType::Directional;
+                    break;
+
+                  case fastgltf::LightType::Spot:
+                    light_comp.type = LightType::Spot;
+                      light_comp.cone_angles[0] =
+                        gltf_light.innerConeAngle.value();
+                    light_comp.cone_angles[1] =
+                        gltf_light.outerConeAngle.value();
+                    break;
+
+                  case fastgltf::LightType::Point:
+                    light_comp.type = LightType::Point;
+                  
+                    break;
+                  }
+
+                  world->addComponent<LightComponent>(node_entity, light_comp);
+                }
+              }
         }
       });
     });

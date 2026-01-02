@@ -34,7 +34,7 @@ void RenderPlugin::build(game::Game &game) {
   RenderBuffersResource render_buffers{};
 
   ResourceHandle vertex_handle =
-      r->createBuffer(800'000'000, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+      r->createBuffer(500'000'000, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -52,10 +52,15 @@ void RenderPlugin::build(game::Game &game) {
       r->createBuffer(5'000, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
+  ResourceHandle light_handle = r->createBuffer(
+      sizeof(GpuLightData) * 1'500,
+      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
   render_buffers.data[BufferType::Vertex] = vertex_handle;
   render_buffers.data[BufferType::Transform] = transform_handle;
   render_buffers.data[BufferType::Material] = material_handle;
   render_buffers.data[BufferType::Camera] = camera_handle;
+  render_buffers.data[BufferType::Light] = light_handle;
 
   game.world.insertResource<RenderBuffersResource>(render_buffers);
 
@@ -116,19 +121,48 @@ void RenderPlugin::build(game::Game &game) {
           Mat4<float> transform_matrix = Mat4<float>::createTransformMatrix(
               transform.translation, transform.scale, transform.rotation);
 
-          RenderModelMatrix gpu_model = createRenderModelMatrix(transform_matrix);
+          RenderModelMatrix gpu_model =
+              createRenderModelMatrix(transform_matrix);
 
           ResourceHandle transform_buffer_handle =
               render_buffers.data.at(BufferType::Transform);
 
-              
-
           gpu_transform.buffer = renderer->writeBuffer(
-              transform_buffer_handle, &gpu_model,
-              sizeof(gpu_model), UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
+              transform_buffer_handle, &gpu_model, sizeof(gpu_model),
+              UINT32_MAX, VK_ACCESS_SHADER_READ_BIT);
 
           cmd.push([e, gpu_transform](Ecs *world) {
             world->addComponent<GpuTransformComponent>(e, gpu_transform);
+          });
+        });
+      });
+
+  game.world.addSystem<Added<Read<LightComponent>>, ResMut<Commands>,
+                       ResMut<IRenderer *>, Res<RenderBuffersResource>>(
+      game.PostUpdate, [](auto view, Commands &cmd, IRenderer *r,
+                          const RenderBuffersResource &resource) {
+        view.forEach([](auto view, Entity e, const LightComponent &light_comp,
+                        Commands &cmd, IRenderer *r,
+                        const RenderBuffersResource &resource) {
+          const ResourceHandle light_buffer_handle =
+              resource.data.at(BufferType::Light);
+
+          GpuLightData light_data{};
+
+          GpuLightComponent gpu_light_comp{};
+
+          light_data.color = light_comp.color;
+          light_data.intensity = light_comp.intensity;
+          light_data.range = light_comp.range;
+          light_data.inner_cone_angle = light_comp.cone_angles[0];
+          light_data.outer_cone_angle = light_comp.cone_angles[1];
+
+          gpu_light_comp.buffer = r->writeBuffer(
+              light_buffer_handle, &light_data, sizeof(light_data), UINT32_MAX,
+              VK_ACCESS_SHADER_READ_BIT);
+
+          cmd.push([e, gpu_light_comp](Ecs *world) {
+            world->addComponent<GpuLightComponent>(e, gpu_light_comp);
           });
         });
       });
@@ -181,6 +215,7 @@ void RenderPlugin::build(game::Game &game) {
 #pragma region Extract
 
   game.world.addSystem<Read<RenderComponent>, Read<GpuTransformComponent>,
+                       Read<TransformComponent>,
                        ResMut<ExtractedRendererResources>,
                        Res<Assets<AssetMesh>>, Res<Assets<AssetMaterial>>,
                        Res<Assets<AssetImage>>>(
@@ -190,6 +225,7 @@ void RenderPlugin::build(game::Game &game) {
                        const Assets<AssetImage> &asset_images) {
         view.forEach([](auto view, Entity e, const RenderComponent &render_comp,
                         const GpuTransformComponent &gpu_transform,
+                        const TransformComponent &transform,
                         ExtractedRendererResources &resources,
                         const Assets<AssetMesh> &asset_meshes,
                         const Assets<AssetMaterial> &asset_mats,
@@ -212,6 +248,11 @@ void RenderPlugin::build(game::Game &game) {
             render_mesh.index_offset = mesh->index.getBufferSpace()[0];
             render_mesh.pipeline_id = 0;
 
+            render_mesh.world_pos =
+                transform.translation; // add parent transforms later
+
+            render_mesh.object_id = resources.meshes.size();
+
             for (size_t img_index = 0; img_index < material->images.size();
                  img_index++) {
 
@@ -233,17 +274,65 @@ void RenderPlugin::build(game::Game &game) {
         });
       });
 
-  game.world
-      .addSystem<Read<GpuCameraComponent>, ResMut<ExtractedRendererResources>>(
-          game.Extract, [](auto view, ExtractedRendererResources &resources) {
-            view.forEach([](auto view, Entity e,
-                            const GpuCameraComponent &gpu_cam,
-                            ExtractedRendererResources &resources) {
-              resources.camera.camera_data.id = gpu_cam.buffer.getBufferIndex();
-              resources.camera.camera_data.offset =
-                  gpu_cam.buffer.getBufferSpace()[0];
-            });
-          });
+  game.world.addSystem<Read<GpuLightComponent>, Read<LightComponent>,
+                       Read<GpuTransformComponent>, Read<TransformComponent>,
+                       ResMut<ExtractedRendererResources>>(
+      game.Extract, [](auto view, ExtractedRendererResources &resources) {
+        view.forEach([](auto view, Entity e,
+                        const GpuLightComponent &gpu_light_comp,
+                        const LightComponent &light_comp,
+                        const GpuTransformComponent &gpu_transform_comp,
+                        const TransformComponent &transform,
+                        ExtractedRendererResources &resources) {
+          RenderLight render_light{};
+          render_light.light.id = gpu_light_comp.buffer.getBufferIndex();
+          render_light.light.offset = gpu_light_comp.buffer.getBufferSpace()[0];
+
+          render_light.transform.id =
+              gpu_transform_comp.buffer.getBufferIndex();
+          render_light.transform.offset =
+              gpu_transform_comp.buffer.getBufferSpace()[0];
+
+          render_light.position_world_space = transform.translation;
+          render_light.radius = light_comp.range;
+
+          render_light.rotation_world_space = transform.rotation;
+
+          switch (light_comp.type) {
+
+          case LightType::Directional:
+            render_light.light_type = GpuLightType::Directional;
+            break;
+          case LightType::Spot:
+            render_light.light_type = GpuLightType::Spot;
+            render_light.angle = light_comp.cone_angles[1];
+            break;
+          case LightType::Point:
+            render_light.light_type = GpuLightType::Point;
+            break;
+          }
+
+          resources.lights.push_back(render_light);
+        });
+      });
+
+  game.world.addSystem<Read<GpuCameraComponent>, Read<TransformComponent>,
+                       ResMut<ExtractedRendererResources>>(
+      game.Extract, [](auto view, ExtractedRendererResources &resources) {
+        view.forEach([](auto view, Entity e, const GpuCameraComponent &gpu_cam,
+                        const TransformComponent &transform,
+                        ExtractedRendererResources &resources) {
+          resources.camera.camera_data.id = gpu_cam.buffer.getBufferIndex();
+          resources.camera.camera_data.offset =
+              gpu_cam.buffer.getBufferSpace()[0];
+
+          Vec3<float> forward = transform.rotation * Vec3<float>::forward();
+          Vec3<float> up = transform.rotation * Vec3<float>::up();
+
+          resources.camera.view_matrix = Mat4<float>::lookAt(
+              transform.translation, up, transform.translation + forward);
+        });
+      });
 
 #pragma endregion
 

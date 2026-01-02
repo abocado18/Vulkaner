@@ -50,18 +50,17 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
 }
 
 void vk_utils::transistionBuffer(VkCommandBuffer command_buffer,
-                                 VkAccessFlags current_access,
-                                 VkAccessFlags new_access, VkBuffer buffer,
-                                 uint32_t src_queue_family,
-                                 uint32_t dst_queue_family) {
+                       VkAccessFlags current_access, VkAccessFlags new_access, uint32_t size, uint32_t offset,
+                       VkBuffer buffer, uint32_t src_queue_family,
+                       uint32_t dst_queue_family) {
 
   VkBufferMemoryBarrier buffer_barrier = {};
   buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   buffer_barrier.buffer = buffer;
   buffer_barrier.srcAccessMask = current_access;
   buffer_barrier.dstAccessMask = new_access;
-  buffer_barrier.offset = 0;
-  buffer_barrier.size = VK_WHOLE_SIZE;
+  buffer_barrier.offset = offset;
+  buffer_barrier.size = size;
   buffer_barrier.srcQueueFamilyIndex = src_queue_family == UINT32_MAX
                                            ? VK_QUEUE_FAMILY_IGNORED
                                            : src_queue_family;

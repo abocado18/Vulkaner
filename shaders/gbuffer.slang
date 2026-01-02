@@ -44,28 +44,38 @@ struct Transform {
 
 };
 
+struct PushConstants {
 
-[vk_binding(0, 0)]
+    uint object_id;
+    uint lighting_id;
+
+}
+
+[vk::push_constant]
+uniform PushConstants pc;
+
+
+[vk::binding(0, 0)]
 ConstantBuffer<CamData> cam_data;
 
 
-[vk_binding(0, 1)]
+[vk::binding(0, 1)]
 ConstantBuffer<Transform> transform;
 
 
-[vk_binding(0, 2)]
+[vk::binding(0, 2)]
 ConstantBuffer<MaterialData> material;
 
-[vk_binding(0, 5)]
+[vk::binding(0, 5)]
 Sampler2D albedo;
 
-[vk_binding(0, 6)]
+[vk::binding(0, 6)]
 Sampler2D normal;
 
-[vk_binding(0, 7)]
+[vk::binding(0, 7)]
 Sampler2D metallic_rougness;
 
-[vk_binding(0, 8)]
+[vk::binding(0, 8)]
 Sampler2D emissive;
 
 
@@ -79,8 +89,9 @@ struct VsOutput
 
     float2 tex_coords;
 
-    float metallic;
-    float roughness;
+    float3 emissive;
+
+   
 
     float4 view_tangent;
  
@@ -90,6 +101,8 @@ struct PsOutput {
     float4 albedo : SV_Target0;
     float4 normal : SV_Target1;
     float4 mrao : SV_Target2;
+    float4 emissive : SV_Target3;
+    uint4 object_lighting_id : SV_Target4;
 
 };
     
@@ -112,8 +125,9 @@ VsOutput vertexMain(uint id : SV_VertexID, VsInput in)
 
     o.tex_coords = in.tex_coords0;
 
-    o.metallic = material.metallic;
-    o.roughness = material.roughness;
+  
+
+
    
     return o;
 }
@@ -168,8 +182,8 @@ PsOutput pixelMain(VsOutput in)
             {
                 float3 mr_tex = metallic_rougness.Sample(in.tex_coords).rgb;
         
-                float metallic  = clamp(in.metallic  * mr_tex.b, 0.0, 1.0);
-                float roughness = clamp(in.roughness * mr_tex.g, 0.0, 1.0);
+                float metallic  = clamp(material.metallic  * mr_tex.b, 0.0, 1.0);
+                float roughness = clamp(material.roughness * mr_tex.g, 0.0, 1.0);
         
                 o.mrao.r = metallic;
                 o.mrao.g = roughness;
@@ -177,8 +191,8 @@ PsOutput pixelMain(VsOutput in)
             }
             else
             {
-                o.mrao.r = clamp(in.metallic,  0.0, 1.0);
-                o.mrao.g = clamp(in.roughness, 0.0, 1.0);
+                o.mrao.r = clamp(material.metallic,  0.0, 1.0);
+                o.mrao.g = clamp(material.roughness, 0.0, 1.0);
 
                 
                 
@@ -186,9 +200,16 @@ PsOutput pixelMain(VsOutput in)
 
             o.mrao.b = 0.0;
             o.mrao.a = 1.0;
-        
+
+       if(material.use_textures[3] == 1) {
+        float3 emissive_tex = emissive.Sample(in.tex_coords).rgb;
+        o.emissive = mul(float4(emissive_tex, 1.0), float4(material.emissive, 1.0));
+       }     
+    else {
+        o.emissive = float4(material.emissive, 1.0);
+    }
             
-   
+    o.object_lighting_id = uint4(pc.object_id, pc.lighting_id, 0, 1);
 
     return o;
 

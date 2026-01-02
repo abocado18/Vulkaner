@@ -30,6 +30,8 @@
 struct FrameData {
   VkCommandPool _graphics_command_pool;
   VkCommandBuffer _graphics_command_buffer;
+  VkCommandBuffer _lighting_command_buffer;
+  VkCommandBuffer _copy_to_swapchain_command_buffer;
 
   VkCommandPool _compute_command_pool;
   VkCommandBuffer _compute_command_buffer;
@@ -37,10 +39,11 @@ struct FrameData {
   VkCommandPool _transfer_command_pool;
   VkCommandBuffer _transfer_command_buffer;
 
-  VkSemaphore _swapchain_semaphore;
-  VkSemaphore _transfer_semaphore;
-  VkSemaphore _compute_semaphore;
-  std::vector<VkSemaphore> _render_semaphores;
+  VkSemaphore _swapchain_image_available_semaphore;
+  VkSemaphore _transfer_finished_semaphore;
+  VkSemaphore _graphics_finished_semaphore;
+  VkSemaphore _lighting_finished_semaphore;
+  std::vector<VkSemaphore> _swapchain_image_finished_semaphores;
 
   VkFence _render_fence;
 
@@ -53,8 +56,8 @@ class IRenderer {
 public:
   virtual ~IRenderer() = default;
 
-  virtual void draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
-                    std::vector<RenderLight> &lights) = 0;
+  virtual void draw(RenderCamera &camera, std::span<RenderMesh> meshes,
+                          std::span<RenderLight> lights) = 0;
 
   virtual ResourceHandle createBuffer(size_t size,
                                       VkBufferUsageFlags usage_flags) = 0;
@@ -91,8 +94,8 @@ public:
     return !glfwWindowShouldClose(_window_handle);
   }
 
-  void draw(RenderCamera &camera, std::vector<RenderMesh> &meshes,
-            std::vector<RenderLight> &lights) override;
+  void draw(RenderCamera &camera, std::span<RenderMesh> meshes,
+                          std::span<RenderLight> lights) override;
 
   ResourceHandle createBuffer(size_t size,
                               VkBufferUsageFlags usage_flags) override;
@@ -164,6 +167,8 @@ private:
   ResourceManager *_resource_manager;
 
   size_t _frame_number = 0;
+
+  std::vector<RenderMesh> culled_meshes {};
 
   std::array<uint32_t, 2> draw_image_size {};
 

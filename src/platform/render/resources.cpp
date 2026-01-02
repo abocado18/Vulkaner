@@ -550,8 +550,10 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
   alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
-                  &staging_buffer.allocation, &staging_buffer.allocation_info), "");
+  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info,
+                           &staging_buffer.buffer, &staging_buffer.allocation,
+                           &staging_buffer.allocation_info),
+           "");
 
   staging_buffer.current_offset = 0;
   staging_buffer.size = size;
@@ -626,15 +628,13 @@ BufferHandle ResourceManager::writeBuffer(ResourceHandle handle, void *data,
     // Not enough space
     vmaDestroyBuffer(_allocator, buf_ref.buffer, buf_ref.allocation);
 
-    //Implement grpwable buffer later, for now throw error
+    // Implement grpwable buffer later, for now throw error
     throw std::runtime_error("Not enough space in buffer");
-
-
   }
 
   ResourceWriteInfo info(handle.idx, {allocated_offset}, staging_buffer);
 
-  info.buffer_write_data = {new_access};
+  info.buffer_write_data = {new_access, size, allocated_offset};
 
   writes.push_back(info);
 
@@ -782,8 +782,10 @@ void ResourceManager::writeImage(ResourceHandle handle, void *data,
   alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info, &staging_buffer.buffer,
-                  &staging_buffer.allocation, &staging_buffer.allocation_info), "");
+  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info,
+                           &staging_buffer.buffer, &staging_buffer.allocation,
+                           &staging_buffer.allocation_info),
+           "");
 
   staging_buffer.current_offset = 0;
   staging_buffer.size = size;
@@ -888,6 +890,10 @@ Image ResourceManager::getTransientImage(const std::string &name,
   create_info.usage = key.image_usage;
   create_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
+  create_info.queueFamilyIndexCount = 1;
+  create_info.pQueueFamilyIndices = &key.queue_family;
+  create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
   VmaAllocationCreateInfo alloc_info = {};
   alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
   alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
@@ -922,11 +928,85 @@ Image ResourceManager::getTransientImage(const std::string &name,
   return new_image;
 }
 
+Buffer ResourceManager::getTransientBuffer(const std::string &name,
+                                           const uint32_t frame) {
+
+  TransientBufferKey &key =
+      transient_buffers_cache[frame].transient_virtual_buffers.at(name);
+
+  auto &buffers = transient_buffers_cache[frame].free_transient_buffers[key];
+
+  size_t i = 0;
+  bool found = false;
+
+  for (auto &buf : buffers) {
+
+    if ((buf.usage_flags & key.usage_flags) == key.usage_flags) {
+
+      found = true;
+      break;
+    }
+
+    i++;
+  }
+
+  if (found) {
+
+    Buffer found_buffer = buffers[i];
+
+    buffers[i] = buffers.back();
+    buffers.pop_back();
+
+    transient_buffers_cache[frame].used_transient_buffers[name] = {
+        key, found_buffer};
+
+    return found_buffer;
+  }
+
+  VkBufferCreateInfo create_info{};
+  create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  create_info.size = key.size;
+  create_info.usage = key.usage_flags;
+  create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  create_info.queueFamilyIndexCount = 1;
+  create_info.pQueueFamilyIndices = &key.queue_family;
+
+  VmaAllocationCreateInfo alloc_info{};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags = key.allocation_flags;
+  alloc_info.priority = 1.0f;
+
+  Buffer new_buffer;
+
+  VK_ERROR(vmaCreateBuffer(_allocator, &create_info, &alloc_info,
+                           &new_buffer.buffer, &new_buffer.allocation,
+                           &new_buffer.allocation_info),
+           "Create transient buffer");
+
+  new_buffer.current_offset = 0;
+  new_buffer.size = key.size;
+  new_buffer.free_spaces.push_back({0, key.size});
+  new_buffer.usage_flags = key.usage_flags;
+
+  transient_buffers_cache[frame].used_transient_buffers[name] = {key,
+                                                                 new_buffer};
+
+  return new_buffer;
+}
+
 void ResourceManager::registerTransientImage(const std::string &name,
                                              const TransientImageKey &key) {
 
   for (auto &cache : transient_images_cache) {
     cache.transient_virtual_images[name] = key;
+  }
+}
+
+void ResourceManager::registerTransientBuffer(const std::string &name,
+                                              const TransientBufferKey &key) {
+
+  for (auto &cache : transient_buffers_cache) {
+    cache.transient_virtual_buffers[name] = key;
   }
 }
 
@@ -943,6 +1023,21 @@ void ResourceManager::resetAllTransientImages(const uint32_t frame) {
   }
 
   cache.used_transient_images.clear();
+}
+
+void ResourceManager::resetAllTransientBuffers(const uint32_t frame) {
+
+  auto &cache = transient_buffers_cache[frame];
+
+  for (auto &p : cache.used_transient_buffers) {
+
+    auto &key = p.second.first;
+    auto &buf = p.second.second;
+
+    cache.free_transient_buffers[key].push_back(buf);
+  }
+
+  cache.used_transient_buffers.clear();
 }
 
 void ResourceManager::transistionResourceImage(
@@ -978,12 +1073,10 @@ void ResourceManager::transistionResourceImage(
       r->value);
 }
 
-void ResourceManager::transistionResourceBuffer(VkCommandBuffer cmd,
-                                                size_t resource_idx,
-                                                VkAccessFlags old_access,
-                                                VkAccessFlags new_access,
-                                                uint32_t src_queue_family,
-                                                uint32_t dst_queue_family) {
+void ResourceManager::transistionResourceBuffer(
+    VkCommandBuffer cmd, size_t resource_idx, VkAccessFlags old_access,
+    VkAccessFlags new_access, uint32_t size, uint32_t offset,
+    uint32_t src_queue_family, uint32_t dst_queue_family) {
 
   auto *r = this->resources[resource_idx].lock().get();
 
@@ -997,8 +1090,9 @@ void ResourceManager::transistionResourceBuffer(VkCommandBuffer cmd,
 
         if constexpr (std::is_same_v<T, Buffer>) {
 
-          vk_utils::transistionBuffer(cmd, old_access, new_access, value.buffer,
-                                      src_queue_family, dst_queue_family);
+          vk_utils::transistionBuffer(cmd, old_access, new_access, size, offset,
+                                      value.buffer, src_queue_family,
+                                      dst_queue_family);
 
         }
 
@@ -1107,7 +1201,6 @@ void ResourceManager::commitWrite(VkCommandBuffer cmd,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
           }
 
-
           bool queue_family_transfer = old_family_index != new_family_index;
 
           this->transistionResourceImage(
@@ -1119,9 +1212,11 @@ void ResourceManager::commitWrite(VkCommandBuffer cmd,
 
         } else if constexpr (std::is_same_v<T, Buffer>) {
 
-          this->transistionResourceBuffer(cmd, write_info.target_index,
-                                          VK_ACCESS_NONE,
-                                          VK_ACCESS_TRANSFER_WRITE_BIT);
+          this->transistionResourceBuffer(
+              cmd, write_info.target_index, VK_ACCESS_NONE,
+              VK_ACCESS_TRANSFER_WRITE_BIT,
+              write_info.buffer_write_data.write_size,
+              write_info.buffer_write_data.write_offset);
 
           VkBufferCopy region = {};
           region.srcOffset = 0;
@@ -1154,4 +1249,16 @@ void ResourceManager::transistionTransientImage(const std::string &name,
                              ref.mip_map_number, ref.array_layers);
 
   ref.current_layout = new_layout;
+}
+
+void ResourceManager::transistionTransientBuffer(
+    const std::string &name, const uint32_t frame, VkCommandBuffer cmd,
+    VkAccessFlags old_access, VkAccessFlags new_access, uint32_t size,
+    uint32_t offset) {
+
+  Buffer &ref =
+      transient_buffers_cache.at(frame).used_transient_buffers.at(name).second;
+
+  vk_utils::transistionBuffer(cmd, old_access, new_access, size, offset,
+                              ref.buffer);
 }

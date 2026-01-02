@@ -49,9 +49,9 @@ template <typename T> struct Vec3 {
     return x * other.x + y * other.y + z * other.z;
   }
 
-  static Vec3 forward() { return {0, 0, -1}; }
-  static Vec3 right() { return {1, 0, 0}; }
-  static Vec3 up() { return {0, 1, 0}; }
+  constexpr static Vec3 forward() { return {0, 0, -1}; }
+  constexpr static Vec3 right() { return {1, 0, 0}; }
+  constexpr static Vec3 up() { return {0, 1, 0}; }
 };
 
 template <typename T> struct Vec2 {
@@ -70,6 +70,45 @@ template <typename T> struct Vec2 {
   Vec2 normalized() const {
     T len = length();
     return len != 0 ? (*this) * (1 / len) : *this;
+  }
+};
+
+template <typename T> struct Vec4 {
+
+  Vec4()
+      : x(static_cast<T>(0)), y(static_cast<T>(0)), z(static_cast<T>(0)),
+        w(static_cast<T>(0)) {};
+
+  Vec4(T x, T y, T z, T w) : x(x), y(y), z(z), w(w) {};
+
+  T x, y, z, w;
+
+  T operator*(const Vec4 &other) const {
+    return (x * other.x + y * other.y + z * other.z + w * other.w);
+  }
+
+  Vec4 operator*(const T other) const {
+    return {x * other, y * other, z * other, w * other};
+  }
+
+  Vec4 operator+(const Vec4 &other) const {
+    return {x + other.x, y + other.y, z + other.z, w + other.w};
+  }
+
+  Vec4 operator-(const Vec4 &other) const {
+    return {x - other.x, y - other.y, z - other.z, w - other.w};
+  }
+
+  T length() const { return std::sqrt(x * x + y * y + z * z + w * w); }
+
+  Vec4 normalized() const {
+    T len = length();
+    return len != 0 ? (*this) * (1 / len) : *this;
+  }
+
+  float dot(const Vec4<T> &other) const {
+
+    return x * other.x + y * other.y + z * other.z + w * other.w;
   }
 };
 
@@ -154,12 +193,10 @@ template <typename T> struct Quat {
   Quat<T> conjugate() const { return Quat<T>{-x, -y, -z, w}; }
 
   Quat<T> operator*(const Quat<T> &rhs) const {
-    return Quat<T>{
-        w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y, 
-        w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x, 
-        w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w, 
-        w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z  
-    };
+    return Quat<T>{w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y,
+                   w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x,
+                   w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w,
+                   w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z};
   }
 };
 
@@ -304,11 +341,10 @@ template <typename T> struct Mat4 {
                    a[4] * a[1] * a[10] + a[4] * a[2] * a[9] +
                    a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
 
-      // Compute determinant
       T det = a[0] * invOut[0] + a[1] * invOut[4] + a[2] * invOut[8] +
               a[3] * invOut[12];
       if (det == 0)
-        return Mat4<T>(); // singular, return zero or identity
+        return Mat4<T>();
 
       det = 1.0 / det;
       for (int i = 0; i < 16; ++i)
@@ -384,7 +420,6 @@ template <typename T> struct Mat4 {
                         const Vec3<T> &center) {
 
     Vec3<T> forward_axis = (center - eye).normalized();
- 
 
     Vec3<T> right_axis = forward_axis.cross(up).normalized();
 
@@ -459,6 +494,21 @@ template <typename T> struct Mat4 {
     }
 
     return m;
+  }
+
+  Vec4<T> const operator*(const Vec4<T> v) const {
+
+    Mat4<T> &m = *this;
+
+    Vec4<T> return_vec{};
+    return_vec.x =
+        v.x * m(0, 0) + v.y * m(0, 1) + v.z * m(0, 2) + v.w * m(0, 3);
+    return_vec.y =
+        v.x * m(1, 0) + v.y * m(1, 1) + v.z * m(1, 2) + v.w * m(1, 3);
+    return_vec.z =
+        v.x * m(2, 0) + v.y * m(2, 1) + v.z * m(2, 2) + v.w * m(2, 3);
+    return_vec.w =
+        v.x * m(3, 0) + v.y * m(3, 1) + v.z * m(3, 2) + v.w * m(3, 3);
   }
 
   T &operator()(const size_t i, const size_t j) { return values[i * 4 + j]; }

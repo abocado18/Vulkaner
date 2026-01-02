@@ -14,7 +14,7 @@ void transistionImage(VkCommandBuffer cmd_buffer, VkImageLayout current_layout,
                       uint32_t dst_queue_family = UINT32_MAX);
 
 void transistionBuffer(VkCommandBuffer command_buffer,
-                       VkAccessFlags current_access, VkAccessFlags new_access,
+                       VkAccessFlags current_access, VkAccessFlags new_access, uint32_t size, uint32_t offset,
                        VkBuffer buffer, uint32_t src_queue_family = UINT32_MAX,
                        uint32_t dst_queue_family = UINT32_MAX);
 
