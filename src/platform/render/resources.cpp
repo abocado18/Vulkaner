@@ -1,6 +1,7 @@
 #include "resources.h"
 #include "platform/render/render_object.h"
 #include "vulkan_macros.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -436,15 +437,26 @@ ResourceHandle ResourceManager::createBuffer(size_t size,
 }
 
 Descriptor ResourceManager::bindResources(
-    std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind,
-    VkDescriptorSetLayout layout) {
+    std::span<CombinedResourceIndexAndDescriptorType> resources_to_bind,
+    uint32_t binding_count, VkDescriptorSetLayout layout) {
 
   Descriptor set;
 
-  {
-    auto it = bound_descriptor_sets.find(resources_to_bind);
+  assert(binding_count <= MAX_BINDINGS_PER_SET);
+  assert(resources_to_bind.size() == binding_count);
 
-    if (it != bound_descriptor_sets.end()) {
+  ResourceDescriptorSetKey key{};
+
+  std::copy(resources_to_bind.begin(),
+            resources_to_bind.begin() + binding_count, key.bindings.begin());
+
+  key.count_bindings = binding_count;
+
+  {
+
+    auto it = resource_descriptors.bound_resource_descriptor_sets.find(key);
+
+    if (it != resource_descriptors.bound_resource_descriptor_sets.end()) {
 
       // Already bound
       set = it->second;
@@ -453,7 +465,7 @@ Descriptor ResourceManager::bindResources(
     }
   }
 
-  std::vector<VkDescriptorType> searched_types(resources_to_bind.size());
+  ResourceDescriptorSetKey searched_types_key{};
 
   {
     size_t i = 0;
@@ -465,16 +477,23 @@ Descriptor ResourceManager::bindResources(
       auto r = resources[idx].lock();
 
       if (!r) {
+        // Resource does not exist anymore
         return {VK_NULL_HANDLE, VK_NULL_HANDLE};
       }
 
-      searched_types[i++] = type;
+      CombinedResourceIndexAndDescriptorType free_searched_type{};
+      free_searched_type.type = type;
+      free_searched_type.idx = SIZE_MAX;
+      free_searched_type.size = SIZE_MAX;
+
+      searched_types_key.bindings[i++] = free_searched_type;
     }
   }
 
-  auto it = free_descriptor_sets.find(searched_types);
+  auto it = resource_descriptors.free_resource_descriptor_sets.find(
+      searched_types_key);
 
-  if (it != free_descriptor_sets.end()) {
+  if (it != resource_descriptors.free_resource_descriptor_sets.end()) {
 
     set = it->second[it->second.size() - 1];
     it->second.pop_back();
@@ -485,11 +504,11 @@ Descriptor ResourceManager::bindResources(
     set.set = _dynamic_allocator.allocate(_device, set.layout);
   }
 
-  std::vector<VkWriteDescriptorSet> writes(resources_to_bind.size());
+  std::array<VkWriteDescriptorSet, MAX_BINDINGS_PER_SET> writes;
 
   DescriptorWriter writer = {};
 
-  for (size_t i = 0; i < writes.size(); i++) {
+  for (size_t i = 0; i < binding_count; i++) {
 
     auto &write = writes[i];
 
@@ -499,20 +518,21 @@ Descriptor ResourceManager::bindResources(
 
       Image &img = std::get<Image>(r->value);
 
-      writer.writeImage(i, img.view, default_sampler, img.current_layout,
-                        searched_types[i]);
+      writer.writeImage(
+          i, img.view, getSampler(searched_types_key.bindings[i].sampler),
+          img.current_layout, searched_types_key.bindings[i].type);
 
     } else {
       Buffer &buf = std::get<Buffer>(r->value);
 
       writer.writeBuffer(i, buf.buffer, resources_to_bind[i].size, 0,
-                         searched_types[i]);
+                         searched_types_key.bindings[i].type);
     }
   }
 
   writer.updateSet(_device, set.set);
 
-  bound_descriptor_sets[resources_to_bind] = set;
+  resource_descriptors.bound_resource_descriptor_sets[key] = set;
 
   return set;
 }
@@ -842,13 +862,22 @@ const Image &ResourceManager::getImage(size_t idx) {
   std::abort();
 }
 
-Image ResourceManager::getTransientImage(const std::string &name,
-                                         const uint32_t frame) {
+Image &ResourceManager::getTransientImage(const std::string &name,
+                                          const uint32_t frame) {
+
+  auto &cache = transient_images_cache[frame];
+
+  
+
+  auto it_used = cache.used_transient_images.find(name);
+  if (it_used != cache.used_transient_images.end()) {
+    return it_used->second.second;
+  }
 
   TransientImageKey &key =
-      transient_images_cache[frame].transient_virtual_images.at(name);
+      cache.transient_virtual_images.at(name);
 
-  auto &images = transient_images_cache[frame].free_transient_images[key];
+  auto &images = cache.free_transient_images[key];
 
   size_t i = 0;
   bool found = false;
@@ -866,15 +895,15 @@ Image ResourceManager::getTransientImage(const std::string &name,
 
   if (found) {
 
-    Image found_image = images[i];
+    Image &found_image = images[i];
 
     images[i] = images.back();
     images.pop_back();
 
-    transient_images_cache[frame].used_transient_images[name] = {key,
-                                                                 found_image};
+    cache.used_transient_images[name] = {
+        key, std::move(found_image)};
 
-    return found_image;
+    return cache.used_transient_images[name].second;
   }
 
   VkImageCreateInfo create_info{};
@@ -923,13 +952,13 @@ Image ResourceManager::getTransientImage(const std::string &name,
         "Create View");
   }
 
-  transient_images_cache[frame].used_transient_images[name] = {key, new_image};
+  cache.used_transient_images[name] = {key, new_image};
 
-  return new_image;
+  return cache.used_transient_images[name].second;
 }
 
-Buffer ResourceManager::getTransientBuffer(const std::string &name,
-                                           const uint32_t frame) {
+Buffer &ResourceManager::getTransientBuffer(const std::string &name,
+                                            const uint32_t frame) {
 
   TransientBufferKey &key =
       transient_buffers_cache[frame].transient_virtual_buffers.at(name);
@@ -960,7 +989,7 @@ Buffer ResourceManager::getTransientBuffer(const std::string &name,
     transient_buffers_cache[frame].used_transient_buffers[name] = {
         key, found_buffer};
 
-    return found_buffer;
+    return transient_buffers_cache[frame].used_transient_buffers[name].second;
   }
 
   VkBufferCreateInfo create_info{};
@@ -991,7 +1020,7 @@ Buffer ResourceManager::getTransientBuffer(const std::string &name,
   transient_buffers_cache[frame].used_transient_buffers[name] = {key,
                                                                  new_buffer};
 
-  return new_buffer;
+  return transient_buffers_cache[frame].used_transient_buffers[name].second;
 }
 
 void ResourceManager::registerTransientImage(const std::string &name,
@@ -1057,11 +1086,14 @@ void ResourceManager::transistionResourceImage(
 
         if constexpr (std::is_same_v<T, Image>) {
 
-          vk_utils::transistionImage(cmd, value.current_layout, new_layout,
-                                     value.image, mip_levels, array_layers,
-                                     old_family_queue, new_family_queue);
-
+          VkImageLayout old_layout = value.current_layout;
           value.current_layout = new_layout;
+
+          vk_utils::transistionImage(cmd, old_layout, new_layout, value.image,
+                                     mip_levels, array_layers,
+                                     value.aspect_mask, old_family_queue,
+                                     new_family_queue);
+
         }
 
         else if constexpr (std::is_same_v<T, Buffer>) {
@@ -1074,7 +1106,7 @@ void ResourceManager::transistionResourceImage(
 }
 
 void ResourceManager::transistionResourceBuffer(
-    VkCommandBuffer cmd, size_t resource_idx, VkAccessFlags old_access,
+    VkCommandBuffer cmd, VkQueueFlags queue_flags, size_t resource_idx, VkAccessFlags old_access,
     VkAccessFlags new_access, uint32_t size, uint32_t offset,
     uint32_t src_queue_family, uint32_t dst_queue_family) {
 
@@ -1091,7 +1123,7 @@ void ResourceManager::transistionResourceBuffer(
         if constexpr (std::is_same_v<T, Buffer>) {
 
           vk_utils::transistionBuffer(cmd, old_access, new_access, size, offset,
-                                      value.buffer, src_queue_family,
+                                      value.buffer, queue_flags, src_queue_family,
                                       dst_queue_family);
 
         }
@@ -1105,10 +1137,13 @@ void ResourceManager::transistionResourceBuffer(
       r->value);
 }
 
-void ResourceManager::commitWriteTransmit(VkCommandBuffer cmd,
+void ResourceManager::commitWriteTransmit(VkCommandBuffer cmd, VkQueueFlags queue_flags,
                                           ResourceWriteInfo &write_info,
                                           uint32_t old_family_index,
                                           uint32_t new_family_index) {
+
+  if (old_family_index == new_family_index)
+    return;
 
   auto weak_r = this->resources.at(write_info.target_index);
 
@@ -1139,7 +1174,7 @@ void ResourceManager::commitWriteTransmit(VkCommandBuffer cmd,
           bool queue_family_transfer = old_family_index != new_family_index;
 
           this->transistionResourceBuffer(
-              cmd, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
+              cmd, queue_flags, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
               write_info.buffer_write_data.new_access,
               queue_family_transfer ? old_family_index : UINT32_MAX,
               queue_family_transfer ? new_family_index : UINT32_MAX);
@@ -1148,7 +1183,7 @@ void ResourceManager::commitWriteTransmit(VkCommandBuffer cmd,
       ref->value);
 }
 
-void ResourceManager::commitWrite(VkCommandBuffer cmd,
+void ResourceManager::commitWrite(VkCommandBuffer cmd, VkQueueFlags queue_flags,
                                   ResourceWriteInfo &write_info,
                                   uint32_t old_family_index,
                                   uint32_t new_family_index) {
@@ -1205,7 +1240,8 @@ void ResourceManager::commitWrite(VkCommandBuffer cmd,
 
           this->transistionResourceImage(
               cmd, write_info.target_index,
-              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              queue_family_transfer ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                    : write_info.image_write_data.new_layout,
               write_info.image_write_data.mip_lvl_data.size(), 1,
               queue_family_transfer ? old_family_index : UINT32_MAX,
               queue_family_transfer ? new_family_index : UINT32_MAX);
@@ -1213,23 +1249,27 @@ void ResourceManager::commitWrite(VkCommandBuffer cmd,
         } else if constexpr (std::is_same_v<T, Buffer>) {
 
           this->transistionResourceBuffer(
-              cmd, write_info.target_index, VK_ACCESS_NONE,
+              cmd, queue_flags, write_info.target_index, VK_ACCESS_NONE,
               VK_ACCESS_TRANSFER_WRITE_BIT,
               write_info.buffer_write_data.write_size,
               write_info.buffer_write_data.write_offset);
 
           VkBufferCopy region = {};
           region.srcOffset = 0;
-          region.dstOffset = write_info.target_offset[0];
-          region.size = write_info.source_buffer.size;
+          region.dstOffset = write_info.buffer_write_data.write_offset;
+          region.size =  write_info.buffer_write_data.write_size;
 
           vkCmdCopyBuffer(cmd, write_info.source_buffer.buffer, value.buffer, 1,
                           &region);
           bool queue_family_transfer = old_family_index != new_family_index;
 
+
           this->transistionResourceBuffer(
-              cmd, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
-              VK_ACCESS_TRANSFER_WRITE_BIT,
+              cmd, queue_flags, write_info.target_index, VK_ACCESS_TRANSFER_WRITE_BIT,
+              queue_family_transfer ? write_info.buffer_write_data.new_access
+                                    : VK_ACCESS_TRANSFER_WRITE_BIT,
+              write_info.buffer_write_data.write_size,
+              write_info.buffer_write_data.write_offset,
               queue_family_transfer ? old_family_index : UINT32_MAX,
               queue_family_transfer ? new_family_index : UINT32_MAX);
         }
@@ -1242,23 +1282,170 @@ void ResourceManager::transistionTransientImage(const std::string &name,
                                                 VkCommandBuffer cmd,
                                                 VkImageLayout new_layout) {
 
-  Image &ref =
-      transient_images_cache.at(frame).used_transient_images.at(name).second;
+  Image *ref =
+      &transient_images_cache.at(frame).used_transient_images.at(name).second;
 
-  vk_utils::transistionImage(cmd, ref.current_layout, new_layout, ref.image,
-                             ref.mip_map_number, ref.array_layers);
+  vk_utils::transistionImage(cmd, ref->current_layout, new_layout, ref->image,
+                             ref->mip_map_number, ref->array_layers,
+                             ref->aspect_mask);
 
-  ref.current_layout = new_layout;
+  ref->current_layout = new_layout;
 }
 
 void ResourceManager::transistionTransientBuffer(
-    const std::string &name, const uint32_t frame, VkCommandBuffer cmd,
+    const std::string &name, const uint32_t frame, VkCommandBuffer cmd, VkQueueFlags queue_flags,
     VkAccessFlags old_access, VkAccessFlags new_access, uint32_t size,
     uint32_t offset) {
 
   Buffer &ref =
       transient_buffers_cache.at(frame).used_transient_buffers.at(name).second;
 
-  vk_utils::transistionBuffer(cmd, old_access, new_access, size, offset,
-                              ref.buffer);
+      
+
+  vk_utils::transistionBuffer(cmd, old_access, new_access, size, offset, 
+                              ref.buffer, queue_flags);
+}
+
+Descriptor ResourceManager::bindTransient(
+    std::span<CombinedTransientNameAndDescriptorType> resources_to_bind,
+    uint32_t binding_count, VkDescriptorSetLayout layout,
+    const uint32_t frame) {
+
+  Descriptor set;
+
+  assert(binding_count <= MAX_BINDINGS_PER_SET);
+  assert(resources_to_bind.size() == binding_count);
+
+  TransientDescriptorSetKey key{};
+
+  std::copy(resources_to_bind.begin(),
+            resources_to_bind.begin() + binding_count, key.bindings.begin());
+
+  key.count_bindings = binding_count;
+
+  {
+
+    auto it =
+        transient_descriptors[frame].bound_resource_descriptor_sets.find(key);
+
+    if (it !=
+        transient_descriptors[frame].bound_resource_descriptor_sets.end()) {
+
+      // Already bound
+      set = it->second;
+
+      return set;
+    }
+  }
+
+  TransientDescriptorSetKey searched_types_key{};
+
+  {
+    size_t i = 0;
+    for (const auto &p : resources_to_bind) {
+
+      const VkDescriptorType type = p.type;
+
+      switch (p.kind) {
+
+      case TransientKind::Buffer: {
+
+        CombinedTransientNameAndDescriptorType free_searched_types_type{
+            "", type, SIZE_MAX, TransientKind::Buffer, {}};
+
+        searched_types_key.bindings[i++] = free_searched_types_type;
+        break;
+      }
+
+      case TransientKind::Image: {
+
+        CombinedTransientNameAndDescriptorType free_searched_types_type{
+            "", type, SIZE_MAX, TransientKind::Image, {}};
+
+        searched_types_key.bindings[i++] = free_searched_types_type;
+        break;
+      }
+
+      case TransientKind::Undefined:
+        throw std::runtime_error("No defined Kind for transient Resource");
+        break;
+      }
+    }
+  }
+  auto it = transient_descriptors[frame].free_resource_descriptor_sets.find(
+      searched_types_key);
+
+  if (it != transient_descriptors[frame].free_resource_descriptor_sets.end()) {
+
+    set = it->second[it->second.size() - 1];
+    it->second.pop_back();
+
+  } else {
+
+    set.layout = layout;
+    set.set = _dynamic_allocator.allocate(_device, set.layout);
+  }
+
+  std::array<VkWriteDescriptorSet, MAX_BINDINGS_PER_SET> writes;
+
+  DescriptorWriter writer = {};
+
+  for (size_t i = 0; i < binding_count; i++) {
+
+    auto &write = writes[i];
+
+    CombinedTransientNameAndDescriptorType &type = resources_to_bind[i];
+
+    switch (type.kind) {
+
+    case TransientKind::Buffer: {
+      Buffer *buf = &transient_buffers_cache[frame]
+                         .used_transient_buffers.at(type.name)
+                         .second;
+
+      assert(buf);
+
+      writer.writeBuffer(i, buf->buffer, type.size, 0, type.type);
+
+      break;
+    }
+    case TransientKind::Image: {
+      Image *img = &transient_images_cache[frame]
+                        .used_transient_images.at(type.name)
+                        .second;
+
+      assert(img);
+
+      writer.writeImage(i, img->view, getSampler(type.sampler),
+                        img->current_layout, type.type);
+
+      break;
+    }
+    case TransientKind::Undefined:
+      throw std::runtime_error("Undefined Type");
+
+      break;
+    }
+  }
+
+  writer.updateSet(_device, set.set);
+
+  transient_descriptors[frame].bound_resource_descriptor_sets[key] = set;
+
+  return set;
+}
+
+VkSampler ResourceManager::getSampler(SamplerKey &key) {
+
+  auto it = samplers.find(key);
+
+  if (it != samplers.end()) {
+
+    return it->second;
+  }
+
+  VK_ERROR(vkCreateSampler(_device, &key.create_info, nullptr, &samplers[key]),
+           "Create Sampler");
+
+  return samplers[key];
 }

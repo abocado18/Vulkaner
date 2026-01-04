@@ -8,21 +8,26 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
+// MAx Number of  Bindings
+constexpr size_t MAX_BINDINGS_PER_SET = 16;
+
 template <typename T> using RefCounted = std::shared_ptr<T>;
 
-template <typename T> struct vectorHash {
-  size_t operator()(const std::vector<T> &vec) const noexcept {
+template <typename T, size_t N> struct arrayHash {
+  size_t operator()(const std::array<T, N> &arr) const noexcept {
     size_t h = 0;
-    for (const auto &x : vec) {
+    for (const auto &x : arr) {
 
       h ^= std::hash<T>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
     }
@@ -118,6 +123,84 @@ struct Buffer {
   VkBufferUsageFlags usage_flags;
 };
 
+struct SamplerKey {
+
+  SamplerKey() : create_info({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO}) {}
+
+  VkSamplerCreateInfo create_info{};
+
+  bool operator==(const SamplerKey &other) const noexcept {
+    const VkSamplerCreateInfo &t = this->create_info;
+    const VkSamplerCreateInfo &o = other.create_info;
+
+    auto float_equal = [](float a, float b) {
+      // Compare bitwise to match hashing
+      uint32_t bits_a, bits_b;
+      std::memcpy(&bits_a, &a, sizeof(a));
+      std::memcpy(&bits_b, &b, sizeof(b));
+      return bits_a == bits_b;
+    };
+
+    return t.addressModeU == o.addressModeU &&
+           t.addressModeV == o.addressModeV &&
+           t.addressModeW == o.addressModeW && t.magFilter == o.magFilter &&
+           t.minFilter == o.minFilter && t.mipmapMode == o.mipmapMode &&
+           t.borderColor == o.borderColor && t.compareOp == o.compareOp &&
+           t.flags == o.flags && t.anisotropyEnable == o.anisotropyEnable &&
+           t.compareEnable == o.compareEnable &&
+           t.unnormalizedCoordinates == o.unnormalizedCoordinates &&
+           float_equal(t.mipLodBias, o.mipLodBias) &&
+           float_equal(t.minLod, o.minLod) && float_equal(t.maxLod, o.maxLod) &&
+           float_equal(t.maxAnisotropy, o.maxAnisotropy);
+  }
+};
+
+namespace std {
+template <> struct hash<SamplerKey> {
+  size_t operator()(const SamplerKey &key) const noexcept {
+    size_t h = 0;
+
+    auto hash_combine = [&h](size_t v) {
+      h ^= v + 0x9e3779b9 + (h << 6) + (h >> 2);
+    };
+
+    hash_combine(std::hash<int>{}(static_cast<int>(key.create_info.magFilter)));
+    hash_combine(std::hash<int>{}(static_cast<int>(key.create_info.minFilter)));
+    hash_combine(
+        std::hash<int>{}(static_cast<int>(key.create_info.mipmapMode)));
+    hash_combine(
+        std::hash<int>{}(static_cast<int>(key.create_info.addressModeU)));
+    hash_combine(
+        std::hash<int>{}(static_cast<int>(key.create_info.addressModeV)));
+    hash_combine(
+        std::hash<int>{}(static_cast<int>(key.create_info.addressModeW)));
+    hash_combine(
+        std::hash<int>{}(static_cast<int>(key.create_info.borderColor)));
+    hash_combine(std::hash<int>{}(static_cast<int>(key.create_info.compareOp)));
+    hash_combine(std::hash<int>{}(static_cast<int>(key.create_info.flags)));
+
+    hash_combine(std::hash<bool>{}(key.create_info.anisotropyEnable != 0));
+    hash_combine(std::hash<bool>{}(key.create_info.compareEnable != 0));
+    hash_combine(
+        std::hash<bool>{}(key.create_info.unnormalizedCoordinates != 0));
+
+    auto float_hash = [](float f) {
+      uint32_t bits;
+      static_assert(sizeof(bits) == sizeof(f), "Size mismatch");
+      std::memcpy(&bits, &f, sizeof(f));
+      return std::hash<uint32_t>{}(bits);
+    };
+
+    hash_combine(float_hash(key.create_info.mipLodBias));
+    hash_combine(float_hash(key.create_info.minLod));
+    hash_combine(float_hash(key.create_info.maxLod));
+    hash_combine(float_hash(key.create_info.maxAnisotropy));
+
+    return h;
+  }
+};
+} // namespace std
+
 class ResourceManager;
 
 struct Resource {
@@ -182,19 +265,23 @@ private:
 struct CombinedResourceIndexAndDescriptorType {
 
   CombinedResourceIndexAndDescriptorType(size_t idx, VkDescriptorType type,
-                                         size_t size)
-      : idx(idx), type(type), size(size) {}
+                                         size_t size, SamplerKey sampler)
+      : idx(idx), type(type), size(size), sampler(sampler) {}
 
   CombinedResourceIndexAndDescriptorType()
-      : idx(SIZE_MAX), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), size(0) {}
+      : idx(SIZE_MAX), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), size(0),
+        sampler() {}
 
   size_t idx;
   VkDescriptorType type;
   size_t size;
 
+  SamplerKey sampler;
+
   bool operator==(const CombinedResourceIndexAndDescriptorType &other) const {
 
-    return (idx == other.idx && type == other.type);
+    return (idx == other.idx && type == other.type) &&
+           (sampler == other.sampler);
   }
 };
 
@@ -329,6 +416,144 @@ template <> struct hash<TransientImageKey> {
 };
 } // namespace std
 
+// enu,to see if Transient Res is Buffer or Image due to being stores seperated
+enum class TransientKind : uint8_t {
+  Buffer,
+  Image,
+  Undefined,
+};
+
+struct CombinedTransientNameAndDescriptorType {
+
+  CombinedTransientNameAndDescriptorType(const std::string &name,
+                                         VkDescriptorType type, size_t size,
+                                         TransientKind kind, SamplerKey sampler)
+      : name(name), type(type), size(size), kind(kind), sampler(sampler) {}
+
+  CombinedTransientNameAndDescriptorType()
+      : name(""), type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), size(0),
+        kind(TransientKind::Undefined) {}
+
+  std::string name;
+  VkDescriptorType type;
+  size_t size;
+
+  TransientKind kind{};
+
+  SamplerKey sampler{};
+
+  bool operator==(const CombinedTransientNameAndDescriptorType &other) const {
+
+    return (name == other.name && type == other.type &&
+            sampler == other.sampler);
+  }
+};
+
+namespace std {
+template <> struct hash<CombinedTransientNameAndDescriptorType> {
+  size_t
+  operator()(const CombinedTransientNameAndDescriptorType &x) const noexcept {
+    size_t seed = 0;
+
+    auto hash_combine = [&seed](size_t h) {
+      seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+    };
+
+    hash_combine(std::hash<std::string_view>{}(x.name));
+    hash_combine(std::hash<int>{}(static_cast<int>(x.type)));
+    hash_combine(std::hash<size_t>{}(x.size));
+
+    return seed;
+  }
+};
+} // namespace std
+
+struct ResourceDescriptorSetKey {
+  std::array<CombinedResourceIndexAndDescriptorType, MAX_BINDINGS_PER_SET>
+      bindings{};
+  uint8_t count_bindings;
+
+  bool operator==(const ResourceDescriptorSetKey &other) const noexcept {
+
+    if (count_bindings != other.count_bindings) {
+      return false;
+    }
+
+    for (size_t i = 0; i < count_bindings; i++) {
+
+      if (bindings[i] != other.bindings[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+};
+
+namespace std {
+template <> struct hash<ResourceDescriptorSetKey> {
+  size_t operator()(const ResourceDescriptorSetKey &key) const noexcept {
+    size_t h = 0;
+
+    for (size_t i = 0; i < key.count_bindings; i++) {
+
+      const CombinedResourceIndexAndDescriptorType &v = key.bindings[i];
+
+      h ^= std::hash<size_t>{}(v.idx) + 0x9e3779b9 + (h << 6) + (h >> 2);
+      h ^= std::hash<size_t>{}(v.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+      h ^= std::hash<size_t>{}(static_cast<size_t>(v.type)) + 0x9e3779b9 +
+           (h << 6) + (h >> 2);
+    }
+
+    return h;
+  }
+};
+} // namespace std
+
+struct TransientDescriptorSetKey {
+  std::array<CombinedTransientNameAndDescriptorType, MAX_BINDINGS_PER_SET>
+      bindings{};
+  uint8_t count_bindings;
+
+  bool operator==(const TransientDescriptorSetKey &other) const noexcept {
+
+    if (count_bindings != other.count_bindings) {
+      return false;
+    }
+
+    for (size_t i = 0; i < count_bindings; i++) {
+
+      if (bindings[i] != other.bindings[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+};
+
+namespace std {
+template <> struct hash<TransientDescriptorSetKey> {
+  size_t operator()(const TransientDescriptorSetKey &key) const noexcept {
+    size_t h = 0;
+
+    for (size_t i = 0; i < key.count_bindings; i++) {
+
+      const CombinedTransientNameAndDescriptorType &v = key.bindings[i];
+
+      h ^= std::hash<std::string_view>{}(v.name) + 0x9e3779b9 + (h << 6) +
+           (h >> 2);
+      h ^= std::hash<size_t>{}(v.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+      h ^= std::hash<size_t>{}(static_cast<size_t>(v.type)) + 0x9e3779b9 +
+           (h << 6) + (h >> 2);
+    }
+
+    return h;
+  }
+};
+
+}; // namespace std
+
 class ResourceManager {
 
 public:
@@ -373,8 +598,8 @@ public:
   void removeResource(size_t idx) { resources.erase(idx); }
 
   Descriptor bindResources(
-      std::vector<CombinedResourceIndexAndDescriptorType> &resources_to_bind,
-      VkDescriptorSetLayout _layout);
+      std::span<CombinedResourceIndexAndDescriptorType> resources_to_bind,
+      uint32_t binding_count, VkDescriptorSetLayout layout);
 
   std::span<ResourceWriteInfo> getWrites() { return writes; }
 
@@ -388,13 +613,13 @@ public:
 
   void resetAllTransientImages(const uint32_t frame);
 
-  Image getTransientImage(const std::string &name, const uint32_t frame);
+  Image &getTransientImage(const std::string &name, const uint32_t frame);
 
   inline const ResourceHandle getPlaceholderImageHandle() const noexcept {
     return placeholder_image_handle;
   }
 
-  Buffer getTransientBuffer(const std::string &name, const uint32_t frame);
+  Buffer &getTransientBuffer(const std::string &name, const uint32_t frame);
 
   void registerTransientBuffer(const std::string &name,
                                const TransientBufferKey &key);
@@ -402,7 +627,7 @@ public:
   void resetAllTransientBuffers(const uint32_t frame);
 
   void transistionTransientBuffer(const std::string &name, const uint32_t frame,
-                                  VkCommandBuffer cmd, VkAccessFlags old_access,
+                                  VkCommandBuffer cmd, VkQueueFlags queue_flags, VkAccessFlags old_access,
                                   VkAccessFlags new_access, uint32_t size,
                                   uint32_t offset);
 
@@ -413,23 +638,33 @@ public:
                                 uint32_t old_family_queue = UINT32_MAX,
                                 uint32_t new_family_queue = UINT32_MAX);
 
-  void transistionResourceBuffer(VkCommandBuffer cmd, size_t resource_idx,
-                                 VkAccessFlags old_access,
+  void transistionResourceBuffer(VkCommandBuffer cmd, VkQueueFlags queue_flags,
+                                 size_t resource_idx, VkAccessFlags old_access,
                                  VkAccessFlags new_access, uint32_t size,
                                  uint32_t offset,
                                  uint32_t src_queue_family = UINT32_MAX,
                                  uint32_t dst_queue_family = UINT32_MAX);
-
-  void commitWrite(VkCommandBuffer cmd, ResourceWriteInfo &write_info,
+  // Used in Transfer Buffer
+  void commitWrite(VkCommandBuffer cmd, VkQueueFlags queue_flags, ResourceWriteInfo &write_info,
                    uint32_t old_family_index, uint32_t new_family_index);
 
-  void commitWriteTransmit(VkCommandBuffer cmd, ResourceWriteInfo &write_info,
+  // Used for Qeueue Transfer when using dedicated Transfer Buffer,
+  void commitWriteTransmit(VkCommandBuffer cmd, VkQueueFlags queue_flags, ResourceWriteInfo &write_info,
                            uint32_t old_family_index,
                            uint32_t new_family_index);
+
+  Descriptor bindTransient(
+      std::span<CombinedTransientNameAndDescriptorType> resources_to_bind,
+      uint32_t binding_count, VkDescriptorSetLayout layout,
+      const uint32_t frame);
 
 private:
   std::unordered_map<size_t, std::weak_ptr<Resource>> resources{};
   std::unordered_map<std::string, size_t> resource_names{};
+
+  std::unordered_map<SamplerKey, VkSampler> samplers{};
+
+  VkSampler getSampler(SamplerKey &key);
 
   ResourceHandle placeholder_image_handle;
 
@@ -467,13 +702,23 @@ private:
 
   DescriptorWriter writer;
 
-  std::unordered_map<std::vector<CombinedResourceIndexAndDescriptorType>,
-                     Descriptor,
-                     vectorHash<CombinedResourceIndexAndDescriptorType>>
-      bound_descriptor_sets = {};
-  std::unordered_map<std::vector<VkDescriptorType>, std::vector<Descriptor>,
-                     vectorHash<VkDescriptorType>>
-      free_descriptor_sets = {};
+  struct ResourceDescriptors {
+
+    std::unordered_map<ResourceDescriptorSetKey, Descriptor>
+        bound_resource_descriptor_sets = {};
+    std::unordered_map<ResourceDescriptorSetKey, std::vector<Descriptor>>
+        free_resource_descriptor_sets = {};
+
+  } resource_descriptors;
+
+  struct TransientDescriptors {
+
+    std::unordered_map<TransientDescriptorSetKey, Descriptor>
+        bound_resource_descriptor_sets = {};
+    std::unordered_map<TransientDescriptorSetKey, std::vector<Descriptor>>
+        free_resource_descriptor_sets = {};
+  };
+  std::array<TransientDescriptors, FRAMES_IN_FLIGHT> transient_descriptors{};
 
   inline size_t getNextId() const {
     static size_t id = 0;

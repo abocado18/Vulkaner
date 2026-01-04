@@ -66,16 +66,16 @@ ConstantBuffer<Transform> transform;
 [vk::binding(0, 2)]
 ConstantBuffer<MaterialData> material;
 
-[vk::binding(0, 5)]
+[vk::binding(0, 3)]
 Sampler2D albedo;
 
-[vk::binding(0, 6)]
+[vk::binding(1, 3)]
 Sampler2D normal;
 
-[vk::binding(0, 7)]
+[vk::binding(2, 3)]
 Sampler2D metallic_rougness;
 
-[vk::binding(0, 8)]
+[vk::binding(3, 3)]
 Sampler2D emissive;
 
 

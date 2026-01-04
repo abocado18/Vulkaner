@@ -1,7 +1,10 @@
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
 #include "main.h"
+
+#include <fstream>
 
 #include "game/game.h"
 #include "game/plugins/default_components_plugin.h"
@@ -12,6 +15,8 @@
 #include "platform/render/renderer.h"
 
 int main() {
+
+ 
 
   game::Game gameplay = {};
 

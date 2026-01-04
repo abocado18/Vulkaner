@@ -8,18 +8,23 @@
 
 namespace vk_utils {
 
-void transistionImage(VkCommandBuffer cmd_buffer, VkImageLayout current_layout,
-                      VkImageLayout new_layout, VkImage image, uint32_t mip_levels = 1, uint32_t array_layers = 1,
-                      uint32_t src_queue_family = UINT32_MAX,
-                      uint32_t dst_queue_family = UINT32_MAX);
+void transistionImage(
+    VkCommandBuffer cmd_buffer, VkImageLayout current_layout,
+    VkImageLayout new_layout, VkImage image, uint32_t mip_levels = 1,
+    uint32_t array_layers = 1,
+    VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t src_queue_family = UINT32_MAX,
+    uint32_t dst_queue_family = UINT32_MAX);
 
 void transistionBuffer(VkCommandBuffer command_buffer,
-                       VkAccessFlags current_access, VkAccessFlags new_access, uint32_t size, uint32_t offset,
-                       VkBuffer buffer, uint32_t src_queue_family = UINT32_MAX,
+                       VkAccessFlags current_access, VkAccessFlags new_access,
+                       uint32_t size, uint32_t offset, VkBuffer buffer, VkQueueFlags queue_flags,
+                       uint32_t src_queue_family = UINT32_MAX,
                        uint32_t dst_queue_family = UINT32_MAX);
 
-VkImageSubresourceRange
-getImageSubResourceRange(VkImageAspectFlags aspect_mask, uint32_t mip_levels, uint32_t array_layers);
+VkImageSubresourceRange getImageSubResourceRange(VkImageAspectFlags aspect_mask,
+                                                 uint32_t mip_levels,
+                                                 uint32_t array_layers);
 
 VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stage_mask,
                                           VkSemaphore semaphore);

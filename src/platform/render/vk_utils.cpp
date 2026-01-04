@@ -5,14 +5,14 @@
 
 void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
                                 VkImageLayout current_layout,
-                                VkImageLayout new_layout, VkImage image, uint32_t mip_levels, uint32_t array_layers,
+                                VkImageLayout new_layout, VkImage image,
+                                uint32_t mip_levels, uint32_t array_layers,
+                                VkImageAspectFlags aspect_mask,
                                 uint32_t src_queue_family,
                                 uint32_t dst_queue_family) {
 
   VkImageMemoryBarrier2 image_barrier = {};
   image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-
-  
 
   image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   image_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
@@ -31,11 +31,6 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
                                           ? VK_QUEUE_FAMILY_IGNORED
                                           : dst_queue_family;
 
-  VkImageAspectFlags aspect_mask =
-      (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
-          ? VK_IMAGE_ASPECT_DEPTH_BIT
-          : VK_IMAGE_ASPECT_COLOR_BIT;
-
   image_barrier.subresourceRange =
       vk_utils::getImageSubResourceRange(aspect_mask, mip_levels, array_layers);
 
@@ -50,9 +45,12 @@ void vk_utils::transistionImage(VkCommandBuffer cmd_buffer,
 }
 
 void vk_utils::transistionBuffer(VkCommandBuffer command_buffer,
-                       VkAccessFlags current_access, VkAccessFlags new_access, uint32_t size, uint32_t offset,
-                       VkBuffer buffer, uint32_t src_queue_family,
-                       uint32_t dst_queue_family) {
+                                 VkAccessFlags current_access,
+                                 VkAccessFlags new_access, uint32_t size,
+                                 uint32_t offset, VkBuffer buffer,
+                                 VkQueueFlags queue_flags,
+                                 uint32_t src_queue_family,
+                                 uint32_t dst_queue_family) {
 
   VkBufferMemoryBarrier buffer_barrier = {};
   buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -68,13 +66,67 @@ void vk_utils::transistionBuffer(VkCommandBuffer command_buffer,
                                            ? VK_QUEUE_FAMILY_IGNORED
                                            : dst_queue_family;
 
-  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                       VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1,
+  auto getStageMask = [](VkAccessFlags access,
+                         VkQueueFlags queue_flags) -> VkPipelineStageFlags {
+    VkPipelineStageFlags stage = 0;
+
+    if (access == 0)
+      return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+    if (access & (VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT))
+        stage |= VK_PIPELINE_STAGE_HOST_BIT;
+
+    if (access & (VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT))
+      stage |= VK_PIPELINE_STAGE_HOST_BIT;
+
+    if (access & (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT))
+      stage |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+    if (queue_flags & VK_QUEUE_GRAPHICS_BIT) {
+      if (access & (VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT))
+        stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+      if (access & (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT))
+        stage |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+      if (access & VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT)
+        stage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+
+      if (access & VK_ACCESS_INDEX_READ_BIT)
+        stage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+    }
+
+    else if (queue_flags & VK_QUEUE_TRANSFER_BIT) {
+
+      if (access & (VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT))
+        stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    }
+
+    else if (queue_flags & VK_QUEUE_COMPUTE_BIT) {
+
+      if (access & (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)) {
+        stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+      }
+    }
+
+    if (stage == 0)
+      stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+    return stage;
+  };
+
+  vkCmdPipelineBarrier(command_buffer,
+                       getStageMask(current_access, queue_flags),
+                       getStageMask(new_access, queue_flags), 0, 0, nullptr, 1,
                        &buffer_barrier, 0, nullptr);
 }
 
 VkImageSubresourceRange
-vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask, uint32_t mip_levels, uint32_t array_layers) {
+vk_utils::getImageSubResourceRange(VkImageAspectFlags aspect_mask,
+                                   uint32_t mip_levels, uint32_t array_layers) {
   VkImageSubresourceRange range = {};
   range.aspectMask = aspect_mask;
   range.baseMipLevel = 0;
